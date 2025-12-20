@@ -24,7 +24,7 @@ async function joinRoom() {
     return
   }
 
-  console.log(`✅ User ${userId} joined room ${ROOM_ID}`)
+  console.log(`User ${userId} joined room ${ROOM_ID}`)
 }
 
 joinRoom()
