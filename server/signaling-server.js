@@ -56,8 +56,4 @@ wss.on('connection', ws => {
       console.log('Disconnected', id);
     }
   });
-<<<<<<< HEAD
 });
-=======
-});
->>>>>>> 8283f660ccb411c4c467816c683900c3b1d899ec

@@ -29,10 +29,22 @@
     <button id="send" type="button">Broadcast</button>
   </div>
 
+  <div class="video-section" style="margin-top: 20px;">
+    <h3>Video Player (Host Controls)</h3>
+    <video id="video" controls style="width: 100%; max-width: 800px; border-radius: 8px; background: #000;">
+      <source src="" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+    <div style="margin-top: 8px;">
+      <label for="videoUrl">Video URL:</label>
+      <input id="videoUrl" type="url" placeholder="Enter video URL" style="width: 60%; margin-left: 8px;" class="small-input">
+      <button id="loadVideo" type="button" style="margin-left: 8px;">Load Video</button>
+    </div>
+    <p style="margin-top: 8px; color: var(--muted); font-size: 0.9rem;">
+      Host controls: Play, pause, and seeking will sync to all clients
+    </p>
+  </div>
+
   <script src="host.js"></script>
 </body>
-<<<<<<< HEAD
 </html>
-=======
-</html>
->>>>>>> 8283f660ccb411c4c467816c683900c3b1d899ec

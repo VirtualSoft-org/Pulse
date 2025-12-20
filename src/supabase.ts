@@ -1,11 +1,15 @@
 import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
 
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
-  throw new Error('Missing SUPABASE env vars')
+function createSupabaseClient() {
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_ANON_KEY
+
+  if (!url || !key) {
+    throw new Error('Missing SUPABASE env vars')
+  }
+
+  return createClient(url, key)
 }
 
-export const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-)
+export const supabase = createSupabaseClient()

@@ -1,0 +1,12 @@
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node',
+    env: {
+      SUPABASE_URL: 'http://localhost:3000',
+      SUPABASE_ANON_KEY: 'test-key'
+    }
+  }
+})

@@ -18,6 +18,17 @@
     <textarea id="log" readonly title="Connection log" placeholder="Connection and messaging log"></textarea>
   </div>
 
+  <div class="video-section" style="margin-top: 20px;">
+    <h3>Video Player (Synchronized)</h3>
+    <video id="video" controls style="width: 100%; max-width: 800px; border-radius: 8px; background: #000;">
+      <source src="" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+    <p style="margin-top: 8px; color: var(--muted); font-size: 0.9rem;">
+      Synchronized playback: Controls are managed by host
+    </p>
+  </div>
+
   <div class="controls">
     <label for="msg" class="visually-hidden">Message to host</label>
     <input id="msg" placeholder="Message to host" title="Message to send to host" class="small-input">
