@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebRTC Star - Client</title>
+  <link rel="stylesheet" href="../../styles.css">
+</head>
+<body>
+  <h2>Client</h2>
+  <div>
+    <label for="sig">Signaling server:</label>
+    <input id="sig" type="url" value="ws://localhost:3000" title="Signaling server websocket URL">
+    <button id="connect" type="button">Connect</button>
+  </div>
+
+  <div class="log">
+    <textarea id="log" readonly title="Connection log" placeholder="Connection and messaging log"></textarea>
+  </div>
+
+  <div class="controls">
+    <label for="msg" class="visually-hidden">Message to host</label>
+    <input id="msg" placeholder="Message to host" title="Message to send to host" class="small-input">
+    <button id="send" type="button">Send</button>
+  </div>
+
+  <script src="client.js"></script>
+</body>
+</html>

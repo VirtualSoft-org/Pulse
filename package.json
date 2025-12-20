@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "pulse",
   "type": "commonjs",
   "version": "1.0.0",
@@ -26,5 +27,19 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "dotenv": "^17.2.3"
+=======
+  "name": "webrtc-star",
+  "version": "1.0.0",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node server/signaling-server.js",
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "ws": "^8.12.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.2"
+>>>>>>> 20383aa0dc8c6c879247908a7e320957732a0bb5
   }
 }
