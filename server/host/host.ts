@@ -105,4 +105,8 @@ sendBtn.onclick = () => {
     if (p.channel && p.channel.readyState === 'open') p.channel.send(`[host] ${text}`);
   }
   msgInput.value = '';
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 8283f660ccb411c4c467816c683900c3b1d899ec
