@@ -1,0 +1,15 @@
+{
+  "name": "webrtc-star",
+  "version": "1.0.0",
+  "main": "signaling-server.js",
+  "scripts": {
+    "start": "node server/signaling-server.js",
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "ws": "^8.12.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.2"
+  }
+}
