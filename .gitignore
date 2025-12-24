@@ -23,8 +23,20 @@ logs/
 # OS / Editor junk
 .DS_Store
 Thumbs.db
+Desktop.ini
 .vscode/
 .idea/
 
 # Supabase local (if ever used later)
 .supabase/
+
+# Cache and temp files
+.cache/
+.tmp/
+*.tmp
+
+# Coverage reports
+coverage/
+
+# Vitest cache
+.vitest/
