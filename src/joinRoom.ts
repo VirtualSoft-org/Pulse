@@ -1,11 +1,13 @@
-import { supabase } from './supabase'
+import { supabase as defaultSupabase } from './supabase'
 import { ensureAuth } from './auth'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-export async function joinRoom(roomId: string) {
-  const userId = await ensureAuth()
+export async function joinRoom(roomId: string, client?: SupabaseClient) {
+  const sb = client ?? defaultSupabase
+  const userId = await ensureAuth(sb)
   console.log('Logged in as:', userId)
 
-  const { error } = await supabase
+  const { error } = await sb
     .from('room_members')
     .insert({
       room_id: roomId,
