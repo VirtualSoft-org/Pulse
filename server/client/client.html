@@ -149,6 +149,22 @@
       <div class="control-group">
         <button id="connect" type="button">Connect to Host</button>
       </div>
+
+      <div class="control-group">
+        <label style="display:block;font-weight:600;margin-bottom:8px;">Your ID</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="myId" style="background:#fff;padding:6px 10px;border-radius:6px;color:#333;user-select:all">—</span>
+          <button id="copyId" type="button">Copy ID</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label style="display:block;font-weight:600;margin-bottom:8px;">Host ID (paste or leave blank to auto-pick)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="hostIdInput" placeholder="paste host id here" style="flex:1;padding:8px;border-radius:6px;border:none;" />
+          <button id="useHostBtn" type="button">Use</button>
+        </div>
+      </div>
       
       <div class="control-group">
         <label style="display: block; font-weight: 600; margin-bottom: 8px;">Connection Log:</label>
@@ -165,6 +181,24 @@
   </div>
   
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <div id="debugBanner" style="position:fixed;left:12px;bottom:12px;padding:8px 12px;background:rgba(0,0,0,0.6);color:#fff;border-radius:6px;font-family:inherit;z-index:9999">Initializing...</div>
+  <script>
+    (function(){
+      const banner = document.getElementById('debugBanner')
+      function update() {
+        const sup = !!window.supabase
+        banner.textContent = `Supabase: ${sup ? 'loaded' : 'missing'} | App script: pending`
+        if (sup) {
+          clearInterval(iv)
+        }
+      }
+      const iv = setInterval(update, 300)
+      update()
+      window.addEventListener('load', () => {
+        banner.textContent = banner.textContent.replace('pending','loaded (page)')
+      })
+    })()
+  </script>
   <script src="client.js"></script>
 </body>
 </html>
