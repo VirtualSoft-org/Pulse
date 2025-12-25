@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import { ensureAuth } from './auth'
 
-type SignalType = 'offer' | 'answer' | 'ice'
+type SignalType = 'offer' | 'answer' | 'ice' | 'host-elected'
 
 type SignalMessage = {
   from: string
@@ -11,9 +11,14 @@ type SignalMessage = {
 }
 
 let channel: any = null
+let privateChannel: any = null
 let myUserId: string | null = null
 let roomTopic: string | null = null
 const listeners: Array<(msg: SignalMessage) => void> = []
+
+function getUserChannelName(userId: string): string {
+  return `user:${userId}`
+}
 
 /** Initialize signaling on the presence channel for `roomId`. */
 export async function initSignaling(roomId: string) {
@@ -21,84 +26,128 @@ export async function initSignaling(roomId: string) {
 
   // close existing
   if (channel) await closeSignaling()
+  if (privateChannel) {
+    try {
+      await privateChannel.unsubscribe()
+    } catch (e) {
+      console.error('[signaling] private channel cleanup error', e)
+    }
+    privateChannel = null
+  }
 
   myUserId = await ensureAuth()
   roomTopic = `room:${roomId}`
+  const privateTopic = getUserChannelName(myUserId)
 
-  // create a broadcast-enabled channel on the same presence topic
-  channel = supabase.channel(roomTopic, { config: { broadcast: { self: true } } })
+  // create room broadcast channel for host updates
+  channel = supabase.channel(roomTopic, { config: { broadcast: { self: false } } })
 
-  // Listen for broadcasted 'signal' events
-  channel.on('broadcast', { event: 'signal' }, (payload: any) => {
-    try {
-      const msg = payload?.payload as SignalMessage | undefined
-      console.log('[signaling] received raw payload:', payload)
-      if (!msg || typeof msg !== 'object') return
+  // create private channel for receiving direct messages
+  privateChannel = supabase.channel(privateTopic, { config: { broadcast: { self: false } } })
 
-      // debug logging
-      console.log('[signaling] received signal', msg)
-
-      // ignore messages not addressed to me or originating from me
-      if (!myUserId) return
-      if (msg.from === myUserId) return
-      if (msg.to !== myUserId) return
-
-      // notify listeners
-      for (const l of listeners) {
-        try {
-          l(msg)
-        } catch (e) {
-          console.error('[signaling] listener error', e)
-        }
-      }
-    } catch (e) {
-      console.error('[signaling] error processing incoming signal', e)
+  // Listen for signals on private channel
+  privateChannel.on(
+    'broadcast',
+    { event: 'signal' },
+    ({ payload }: { payload: SignalMessage }) => {
+      dispatchSignal(payload)
     }
-  })
+  )
 
-  // subscribe and await confirmation
-  await new Promise<void>((resolve, reject) => {
-    let settled = false
-    channel.subscribe((status: any, err?: Error) => {
-      if (settled) return
-      if (err) {
-        settled = true
-        reject(err)
-        return
-      }
-      if (status === 'SUBSCRIBED') {
-        settled = true
-        console.log(`[signaling] subscribed to ${roomTopic} as ${myUserId}`)
-        resolve()
-        return
-      }
+  // Listen for host updates on room channel
+  channel.on(
+    'broadcast',
+    { event: 'host-update' },
+    ({ payload }: { payload: SignalMessage }) => {
+      dispatchSignal(payload)
+    }
+  )
+
+  // Subscribe to both channels
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      let settled = false
+      channel.subscribe((status: any, err?: Error) => {
+        if (settled) return
+        if (err) {
+          settled = true
+          reject(err)
+          return
+        }
+        if (status === 'SUBSCRIBED') {
+          settled = true
+          console.log(`[signaling] subscribed to room ${roomTopic} as ${myUserId}`)
+          resolve()
+        }
+      })
+      setTimeout(() => {
+        if (!settled) {
+          settled = true
+          reject(new Error('room subscribe timeout'))
+        }
+      }, 5000)
+    }),
+    new Promise<void>((resolve, reject) => {
+      let settled = false
+      privateChannel.subscribe((status: any, err?: Error) => {
+        if (settled) return
+        if (err) {
+          settled = true
+          reject(err)
+          return
+        }
+        if (status === 'SUBSCRIBED') {
+          settled = true
+          console.log(`[signaling] subscribed to private channel ${privateTopic}`)
+          resolve()
+        }
+      })
+      setTimeout(() => {
+        if (!settled) {
+          settled = true
+          reject(new Error('private subscribe timeout'))
+        }
+      }, 5000)
     })
-    setTimeout(() => {
-      if (!settled) {
-        settled = true
-        reject(new Error('subscribe timeout'))
-      }
-    }, 5000)
-  })
+  ])
 }
 
-/** Send a signaling message to `to` (userId). */
+/** Send a signaling message to another user. */
 export async function sendSignal(to: string, type: SignalType, data: any) {
-  if (!channel) throw new Error('signaling not initialized')
   if (!myUserId) throw new Error('not authenticated')
-  if (!roomTopic) throw new Error('no room topic')
+  if (to === myUserId) {
+    console.warn('[signaling] Attempted to send signal to self, ignoring')
+    return
+  }
 
   const msg: SignalMessage = { from: myUserId, to, type, data }
+  console.log(`[signaling] sending ${type} → ${to}`)
 
-  console.log('[signaling] sending', msg)
-
-  try {
-    const res = await channel.send({ type: 'broadcast', event: 'signal', payload: msg })
-    console.log('[signaling] send result', res)
-    return res
-  } catch (e) {
-    console.error('[signaling] send error', e)
-    throw e
+  if (type === 'host-elected') {
+    if (!channel) throw new Error('room channel not initialized')
+    return await channel.send({ type: 'broadcast', event: 'host-update', payload: msg })
+  } else {
+    // FIX: Cache channels instead of creating new ones each time
+    const userChannel = supabase.channel(getUserChannelName(to), {
+      config: { broadcast: { self: false } }
+    })
+    
+    try {
+      const res = await userChannel.send({ 
+        type: 'broadcast', 
+        event: 'signal', 
+        payload: msg 
+      })
+      console.log('[signaling] sent to private channel')
+      // FIX: Unsubscribe after sending to prevent memory leak
+      setTimeout(() => {
+        userChannel.unsubscribe().catch(() => {})
+      }, 1000)
+      return res
+    } catch (e) {
+      console.error('[signaling] send to private channel failed', e)
+      throw e
+    }
   }
 }
 
@@ -111,22 +160,47 @@ export function onSignal(cb: (msg: SignalMessage) => void) {
   }
 }
 
+/** Dispatch a received signal message to listeners. */
+function dispatchSignal(msg: SignalMessage) {
+  if (!myUserId) return
+  if (msg.to !== myUserId) return
+  if (!['offer', 'answer', 'ice', 'host-elected'].includes(msg.type)) return
+
+  console.log(`[signaling] ${msg.type} ← ${msg.from}`)
+
+  for (const cb of listeners) {
+    try {
+      cb(msg)
+    } catch (e) {
+      console.error('[signaling] Listener error:', e)
+    }
+  }
+}
+
 /** Close the signaling channel and clear listeners. */
 export async function closeSignaling() {
   try {
+    if (privateChannel) {
+      try {
+        await privateChannel.unsubscribe()
+      } catch (e) {
+        console.error('[signaling] private unsubscribe error', e)
+      }
+    }
     if (channel) {
       try {
         await channel.unsubscribe()
       } catch (e) {
-        console.error('[signaling] unsubscribe error', e)
+        console.error('[signaling] room unsubscribe error', e)
       }
     }
   } finally {
     channel = null
+    privateChannel = null
     roomTopic = null
     myUserId = null
     listeners.length = 0
-    console.log('[signaling] closed')
+    console.log('[signaling] closed all channels')
   }
 }
 

@@ -1,27 +1,19 @@
 /*
  WebRTC DataChannel implementation (Node) using Supabase signaling
+ WITH Multi-Peer Support and Message Protocol v1
 
- - Host-driven flow: first user in room is host (determined by room_members count === 1)
- - Host creates RTCPeerConnection and DataChannel for each peer and sends offers
- - Client never creates offers; client responds with answers when it receives an offer
- - Signaling via existing `sendSignal()` and `onSignal()` (signal messages: offer/answer/ice)
- - DataChannel name: "data" (reliable)
-
- Public API:
- - initWebRTC(roomId)
- - connectToPeer(peerId)            // host only: create offer for peer
- - sendToPeer(peerId, message)
- - broadcast(message)
- - closePeer(peerId)
-
- Notes:
- - Requires `wrtc` package when running in Node (ts-node). Install with `npm i wrtc`.
- - Uses Google STUN: stun:stun.l.google.com:19302
+ Changes for Phase 5.4-5.5:
+ 1. Host maintains Map<peerId, RTCPeerConnection>
+ 2. Host auto-connects to new peers on join
+ 3. Host cleans up when peers leave
+ 4. Clients only accept offers from host
+ 5. Message protocol v1 with typed messages
 */
 
 import { supabase } from './supabase'
 import { ensureAuth } from './auth'
 import { sendSignal, onSignal } from './signaling'
+import { amIHost, listenForHostChanges } from './hostElection'
 
 // Use dynamic import typing to avoid compile issues if wrtc is not present at type-check time
 const wrtc = require('wrtc')
@@ -29,13 +21,44 @@ type RTCPeerConnectionT = any
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 
+// Message Protocol v1
+export type RTCMessage = 
+  | { type: 'ping' }
+  | { type: 'pong' }
+  | { type: 'chat'; text: string }
+  | { type: 'state'; payload: any }
+  | { type: 'control'; action: string }
+
+// Connection State Machine
+type ConnectionState = 
+  | 'idle'
+  | 'offering'
+  | 'answering'
+  | 'connecting'
+  | 'connected'
+  | 'failed'
+  | 'closed'
+
+interface PeerConnection {
+  pc: RTCPeerConnectionT
+  dc: any | null
+  state: ConnectionState
+  retryCount: number
+  lastError: string | null
+}
+
 let myUserId: string | null = null
 let roomIdGlobal: string | null = null
 let isHost = false
+let currentHostId: string | null = null
+let roomMembersChannel: any = null
 
-const pcs: Map<string, RTCPeerConnectionT> = new Map()
-const dataChannels: Map<string, any> = new Map()
+const peerConnections: Map<string, PeerConnection> = new Map()
 const pendingCandidates: Map<string, any[]> = new Map()
+
+// Message handler type
+type MessageHandler = (message: RTCMessage, peerId: string) => void
+let messageHandler: MessageHandler = () => {}
 
 /** Initialize WebRTC signaling and role detection. */
 export async function initWebRTC(roomId: string) {
@@ -44,53 +67,59 @@ export async function initWebRTC(roomId: string) {
 
   myUserId = await ensureAuth()
 
-  // determine host: check FORCE_HOST env var first, otherwise first user alphabetically
-  if (process.env.FORCE_HOST === 'true') {
-    isHost = true
-  } else {
-    const { data: members, error } = await supabase
-      .from('room_members')
-      .select('user_id')
-      .eq('room_id', roomId)
-      .order('user_id', { ascending: true })
+  // Use proper host election
+  isHost = await amIHost(roomId)
+  console.log(`[webrtc] ${myUserId} is ${isHost ? 'HOST' : 'CLIENT'}`)
 
-    if (error) {
-      console.warn('Could not read room_members to determine host:', error)
-      // default to client role
-      isHost = false
-    } else {
-      if (Array.isArray(members) && members.length > 0 && members[0].user_id === myUserId) {
-        isHost = true
-      } else {
-        isHost = false
-      }
+  // Get current host
+  const { data: roomData } = await supabase
+    .from('rooms')
+    .select('host_id')
+    .eq('id', roomId)
+    .single()
+  
+  currentHostId = roomData?.host_id || null
+
+  // Listen for host changes
+  listenForHostChanges(roomId, (newHostId) => {
+    const wasHost = isHost
+    currentHostId = newHostId
+    isHost = newHostId === myUserId
+    
+    if (!wasHost && isHost) {
+      console.log('[webrtc] I became the host! Connecting to existing peers...')
+      connectToExistingPeers()
+    } else if (wasHost && !isHost) {
+      console.log('[webrtc] I am no longer the host')
     }
-  }
+  })
 
-  console.log(`[webrtc] initWebRTC room=${roomId} user=${myUserId} isHost=${isHost}`)
+  // Set up room members subscription for multi-peer
+  await setupRoomMembersSubscription(roomId)
 
   // listen for incoming signaling messages
   onSignal(async (msg: any) => {
-    // signaling module already filters by `to === myUserId` and skips self messages,
-    // but sanity-check here as well
     if (!myUserId) return
     if (msg.to !== myUserId) return
     if (msg.from === myUserId) return
 
     const from = msg.from as string
+    
+    // Phase 5.4: Clients only accept offers from host
+    if (msg.type === 'offer' && !isHost && from !== currentHostId) {
+      console.error(`[webrtc] Rejecting offer from non-host: ${from}`)
+      return
+    }
+
     try {
       if (msg.type === 'offer') {
-        // Client path: create PC, set remote offer, create answer
         console.log('[webrtc] received offer from', from)
         await handleOffer(from, msg.data)
       } else if (msg.type === 'answer') {
         console.log('[webrtc] received answer from', from)
         await handleAnswer(from, msg.data)
       } else if (msg.type === 'ice') {
-        // incoming ICE candidate
         await handleRemoteIce(from, msg.data)
-      } else {
-        console.warn('[webrtc] unknown signal type', msg.type)
       }
     } catch (e) {
       console.error('[webrtc] error handling signal', e)
@@ -98,177 +127,414 @@ export async function initWebRTC(roomId: string) {
   })
 }
 
+/** Set up subscription to room members for auto-connection/disconnection */
+async function setupRoomMembersSubscription(roomId: string) {
+  roomMembersChannel = supabase.channel(`room-members:${roomId}`)
+  
+  roomMembersChannel.on(
+    'postgres_changes',
+    {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'room_members',
+      filter: `room_id=eq.${roomId}`
+    },
+    (payload: any) => {
+      const newUserId = payload.new.user_id
+      if (newUserId !== myUserId && isHost) {
+        console.log(`[webrtc] New member joined: ${newUserId}, auto-connecting...`)
+        connectToPeer(newUserId).catch(e => 
+          console.error(`[webrtc] Failed to auto-connect to ${newUserId}:`, e)
+        )
+      }
+    }
+  )
+
+  roomMembersChannel.on(
+    'postgres_changes',
+    {
+      event: 'DELETE',
+      schema: 'public',
+      table: 'room_members',
+      filter: `room_id=eq.${roomId}`
+    },
+    (payload: any) => {
+      const leftUserId = payload.old.user_id
+      if (leftUserId !== myUserId) {
+        console.log(`[webrtc] Member left: ${leftUserId}, cleaning up...`)
+        closePeer(leftUserId).catch(e =>
+          console.error(`[webrtc] Failed to clean up ${leftUserId}:`, e)
+        )
+      }
+    }
+  )
+
+  await new Promise<void>((resolve, reject) => {
+    roomMembersChannel.subscribe((status: any, err?: Error) => {
+      if (err) reject(err)
+      else if (status === 'SUBSCRIBED') resolve()
+    })
+  })
+  
+  console.log(`[webrtc] Subscribed to room members for ${roomId}`)
+}
+
+/** Connect to all existing peers (host only) */
+async function connectToExistingPeers() {
+  if (!roomIdGlobal || !isHost) return
+
+  const { data: members } = await supabase
+    .from('room_members')
+    .select('user_id')
+    .eq('room_id', roomIdGlobal)
+    .neq('user_id', myUserId)
+
+  console.log(`[webrtc] Connecting to ${members?.length || 0} existing peers`)
+  
+  for (const member of members || []) {
+    await connectToPeer(member.user_id)
+  }
+}
+
 /** Host: create a peer connection and send an offer to peerId. */
 export async function connectToPeer(peerId: string) {
   if (!myUserId) throw new Error('not initialized')
-  if (!isHost) throw new Error('connectToPeer only allowed for host')
-  if (pcs.has(peerId)) return
+  if (!isHost) {
+    throw new Error('Permission denied: only host can connect to peers')
+  }
+  
+  // Check if we already have a connection
+  const existing = peerConnections.get(peerId)
+  if (existing && (existing.state === 'connected' || existing.state === 'connecting')) {
+    console.log(`[webrtc] Already ${existing.state} with ${peerId}`)
+    return
+  }
 
+  updatePeerState(peerId, 'offering')
+  
   const pc = createPeerConnection(peerId, true)
-  pcs.set(peerId, pc)
-
-  // create reliable data channel named 'data'
   const dc = pc.createDataChannel('data')
+  
+  peerConnections.set(peerId, {
+    pc,
+    dc,
+    state: 'offering',
+    retryCount: 0,
+    lastError: null
+  })
+
   setupDataChannel(peerId, dc)
-  dataChannels.set(peerId, dc)
 
-  const offer = await pc.createOffer()
-  await pc.setLocalDescription(offer)
+  try {
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    updatePeerState(peerId, 'connecting')
 
-  // send plain offer
-  await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
-  console.log('[webrtc] sent offer to', peerId)
+    await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
+    console.log(`[webrtc] sent offer to ${peerId}`)
+  } catch (e: any) {
+    updatePeerState(peerId, 'failed', `Failed to create offer: ${e.message}`)
+    throw e
+  }
 }
 
-/** Send a string message to peer via DataChannel. */
-export function sendToPeer(peerId: string, message: string) {
-  const dc = dataChannels.get(peerId)
-  if (!dc) throw new Error('no data channel for peer')
-  if (dc.readyState !== 'open') throw new Error('datachannel not open')
-  dc.send(message)
+/** Send a typed message to peer */
+export function sendToPeer(peerId: string, message: RTCMessage) {
+  const conn = peerConnections.get(peerId)
+  if (!conn || !conn.dc) throw new Error('no data channel for peer')
+  if (conn.dc.readyState !== 'open') throw new Error('datachannel not open')
+  if (conn.state !== 'connected') throw new Error('peer not connected')
+  
+  conn.dc.send(JSON.stringify(message))
 }
 
-/** Broadcast a string message to all connected peers. */
-export function broadcast(message: string) {
-  for (const [peerId, dc] of dataChannels.entries()) {
-    if (dc && dc.readyState === 'open') {
-      dc.send(message)
+/** Broadcast a typed message to all connected peers */
+export function broadcast(message: RTCMessage) {
+  for (const [peerId, conn] of peerConnections.entries()) {
+    if (conn.dc && conn.dc.readyState === 'open' && conn.state === 'connected') {
+      conn.dc.send(JSON.stringify(message))
     }
   }
 }
 
-/** Close peer connection and cleanup. */
+/** Set message handler for incoming messages */
+export function onMessage(handler: MessageHandler) {
+  messageHandler = handler
+}
+
+/** Close peer connection and cleanup */
 export async function closePeer(peerId: string) {
-  const pc = pcs.get(peerId)
-  if (pc) {
+  const conn = peerConnections.get(peerId)
+  if (conn) {
     try {
-      pc.close()
+      conn.pc.close()
     } catch {}
-    pcs.delete(peerId)
+    updatePeerState(peerId, 'closed')
   }
-  if (dataChannels.has(peerId)) dataChannels.delete(peerId)
+  peerConnections.delete(peerId)
   pendingCandidates.delete(peerId)
 }
 
-/** Internal: create RTCPeerConnection with handlers. */
-function createPeerConnection(peerId: string, isInitiator: boolean) {
+/** Internal: create RTCPeerConnection with handlers */
+function createPeerConnection(peerId: string, isInitiator: boolean): RTCPeerConnectionT {
   const pc = new wrtc.RTCPeerConnection({ iceServers: ICE_SERVERS })
 
-  // send local ICE candidates to peer via signaling
   pc.onicecandidate = (ev: any) => {
     const c = ev.candidate
     if (c) {
-      // send candidate object
       sendSignal(peerId, 'ice', c).catch(e => console.error('[webrtc] send ice failed', e))
     }
   }
 
-  pc.onconnectionstatechange = () => {
-    console.log('[webrtc] connectionState', peerId, pc.connectionState)
+  pc.oniceconnectionstatechange = () => {
+    const conn = peerConnections.get(peerId)
+    if (!conn) return
+    
+    const state = pc.iceConnectionState
+    console.log(`[webrtc] ICE connection state for ${peerId}: ${state}`)
+    
+    if (state === 'failed' || state === 'disconnected') {
+      if (conn.retryCount < 1) {
+        console.log(`[webrtc] Attempting retry for ${peerId}`)
+        conn.retryCount++
+        // Trigger reconnection for host
+        if (isHost) {
+          setTimeout(() => {
+            if (peerConnections.has(peerId)) {
+              connectToPeer(peerId).catch(e => 
+                console.error(`[webrtc] Retry failed for ${peerId}:`, e)
+              )
+            }
+          }, 1000)
+        }
+      } else {
+        updatePeerState(peerId, 'failed', `ICE connection ${state}`)
+      }
+    } else if (state === 'connected' || state === 'completed') {
+      updatePeerState(peerId, 'connected')
+    }
   }
 
-  // client receives datachannel via ondatachannel
+  // Client receives datachannel via ondatachannel
   pc.ondatachannel = (ev: any) => {
     const dc = ev.channel
-    setupDataChannel(peerId, dc)
-    dataChannels.set(peerId, dc)
+    const conn = peerConnections.get(peerId)
+    if (conn) {
+      setupDataChannel(peerId, dc)
+      conn.dc = dc
+    } else {
+      const newConn: PeerConnection = {
+        pc,
+        dc,
+        state: 'connecting',
+        retryCount: 0,
+        lastError: null
+      }
+      peerConnections.set(peerId, newConn)
+      setupDataChannel(peerId, dc)
+    }
   }
 
-  // prepare pending candidates list
   pendingCandidates.set(peerId, [])
-
   return pc
 }
 
 function setupDataChannel(peerId: string, dc: any) {
   dc.onopen = () => {
     console.log(`✅ DataChannel open with ${peerId}`)
+    updatePeerState(peerId, 'connected')
   }
+  
   dc.onmessage = (ev: any) => {
-    console.log(`[webrtc] message from ${peerId}:`, ev.data)
-    // auto-reply example: if receives 'ping' reply 'pong'
     try {
-      const text = typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data)
-      if (text === 'ping') {
-        dc.send('pong')
+      const message = JSON.parse(ev.data) as RTCMessage
+      console.log(`[webrtc] message from ${peerId}:`, message)
+      
+      // Auto-reply for ping
+      if (message.type === 'ping') {
+        sendToPeer(peerId, { type: 'pong' })
       }
+      
+      // Call message handler
+      messageHandler(message, peerId)
     } catch (e) {
-      console.error('datachannel message handler error', e)
+      console.error(`[webrtc] Failed to parse message from ${peerId}:`, e)
     }
   }
+  
   dc.onclose = () => {
-    console.log('[webrtc] datachannel closed for', peerId)
+    console.log(`[webrtc] datachannel closed for ${peerId}`)
+    updatePeerState(peerId, 'closed')
+  }
+  
+  dc.onerror = (ev: any) => {
+    console.error(`[webrtc] datachannel error for ${peerId}:`, ev)
+    updatePeerState(peerId, 'failed', 'DataChannel error')
   }
 }
 
-/** Handle incoming offer (client path). */
+/** Handle incoming offer (client path) */
 async function handleOffer(from: string, offer: any) {
-  // create pc if not exists
-  if (pcs.has(from)) {
-    console.warn('[webrtc] already have pc for', from)
+  const existing = peerConnections.get(from)
+  if (existing && (existing.state === 'connected' || existing.state === 'connecting')) {
+    console.warn(`[webrtc] Already ${existing.state} with ${from}, ignoring duplicate offer`)
+    return
   }
+
+  updatePeerState(from, 'answering')
+  
   const pc = createPeerConnection(from, false)
-  pcs.set(from, pc)
-
-  // set remote description
-  await pc.setRemoteDescription(new wrtc.RTCSessionDescription(offer))
-
-  // create answer
-  const answer = await pc.createAnswer()
-  await pc.setLocalDescription(answer)
-
-  // send answer back to host
-  await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
-  console.log('[webrtc] sent answer to', from)
-
-  // flush pending ICE candidates if any
-  const pend = pendingCandidates.get(from) || []
-  for (const cand of pend) {
-    try {
-      await pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
-    } catch (e) {
-      console.warn('[webrtc] addIceCandidate error (pending flush)', e)
-    }
+  const conn: PeerConnection = {
+    pc,
+    dc: null,
+    state: 'answering',
+    retryCount: 0,
+    lastError: null
   }
-  pendingCandidates.set(from, [])
+  peerConnections.set(from, conn)
+
+  try {
+    await pc.setRemoteDescription(new wrtc.RTCSessionDescription(offer))
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    updatePeerState(from, 'connecting')
+
+    await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
+    console.log(`[webrtc] sent answer to ${from}`)
+
+    const pend = pendingCandidates.get(from) || []
+    for (const cand of pend) {
+      try {
+        await pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
+      } catch (e) {
+        console.warn('[webrtc] addIceCandidate error (pending flush)', e)
+      }
+    }
+    pendingCandidates.set(from, [])
+  } catch (e: any) {
+    updatePeerState(from, 'failed', `Failed to handle offer: ${e.message}`)
+    throw e
+  }
 }
 
-/** Handle incoming answer (host path). */
+/** Handle incoming answer (host path) */
 async function handleAnswer(from: string, answer: any) {
-  const pc = pcs.get(from)
-  if (!pc) {
+  const conn = peerConnections.get(from)
+  if (!conn) {
     console.warn('[webrtc] no pc for answer from', from)
     return
   }
-  await pc.setRemoteDescription(new wrtc.RTCSessionDescription(answer))
 
-  // flush pending ICE candidates
-  const pend = pendingCandidates.get(from) || []
-  for (const cand of pend) {
-    try {
-      await pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
-    } catch (e) {
-      console.warn('[webrtc] addIceCandidate error (pending flush)', e)
+  try {
+    await conn.pc.setRemoteDescription(new wrtc.RTCSessionDescription(answer))
+    updatePeerState(from, 'connecting')
+
+    const pend = pendingCandidates.get(from) || []
+    for (const cand of pend) {
+      try {
+        await conn.pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
+      } catch (e) {
+        console.warn('[webrtc] addIceCandidate error (pending flush)', e)
+      }
     }
+    pendingCandidates.set(from, [])
+  } catch (e: any) {
+    updatePeerState(from, 'failed', `Failed to handle answer: ${e.message}`)
+    throw e
   }
-  pendingCandidates.set(from, [])
 }
 
-/** Handle incoming remote ICE candidate. */
+/** Handle incoming remote ICE candidate */
 async function handleRemoteIce(from: string, cand: any) {
-  const pc = pcs.get(from)
-  if (!pc) {
-    // store candidate to add later when pc/remoteDesc available
+  const conn = peerConnections.get(from)
+  if (!conn) {
     const arr = pendingCandidates.get(from) || []
     arr.push(cand)
     pendingCandidates.set(from, arr)
     return
   }
   try {
-    await pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
+    await conn.pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
   } catch (e) {
     console.warn('[webrtc] addIceCandidate failed', e)
   }
+}
+
+/** Update peer state with validation */
+function updatePeerState(peerId: string, newState: ConnectionState, error?: string) {
+  const conn = peerConnections.get(peerId)
+  const oldState = conn?.state || 'idle'
+  
+  // State transition validation
+  const validTransitions: Record<ConnectionState, ConnectionState[]> = {
+    idle: ['offering', 'answering', 'closed'],
+    offering: ['connecting', 'failed', 'closed'],
+    answering: ['connecting', 'failed', 'closed'],
+    connecting: ['connected', 'failed', 'closed'],
+    connected: ['failed', 'closed'],
+    failed: ['connecting', 'closed'],
+    closed: []
+  }
+
+  if (!validTransitions[oldState]?.includes(newState)) {
+    console.warn(`[webrtc] Invalid state transition: ${oldState} -> ${newState} for ${peerId}`)
+  }
+
+  if (conn) {
+    conn.state = newState
+    if (error) {
+      conn.lastError = error
+      console.error(`[webrtc] ${peerId} state: ${oldState} -> ${newState}, error: ${error}`)
+    } else {
+      console.log(`[webrtc] ${peerId} state: ${oldState} -> ${newState}`)
+    }
+    
+    if (newState === 'connected') {
+      conn.retryCount = 0
+    }
+  } else if (newState !== 'closed') {
+    peerConnections.set(peerId, {
+      pc: null as any,
+      dc: null,
+      state: newState,
+      retryCount: 0,
+      lastError: error || null
+    })
+  }
+}
+
+/** Get current state of peer connection */
+export function getPeerState(peerId: string): ConnectionState | null {
+  return peerConnections.get(peerId)?.state || null
+}
+
+/** Get all connected peers */
+export function getConnectedPeers(): string[] {
+  const peers: string[] = []
+  for (const [peerId, conn] of peerConnections.entries()) {
+    if (conn.state === 'connected') {
+      peers.push(peerId)
+    }
+  }
+  return peers
+}
+
+/** Cleanup all connections */
+export async function cleanup() {
+  for (const peerId of Array.from(peerConnections.keys())) {
+    await closePeer(peerId)
+  }
+  
+  if (roomMembersChannel) {
+    try {
+      await roomMembersChannel.unsubscribe()
+    } catch (e) {
+      console.error('[webrtc] Error unsubscribing room members channel:', e)
+    }
+    roomMembersChannel = null
+  }
+  
+  console.log('[webrtc] Cleanup complete')
 }
 
 export default {
@@ -276,5 +542,9 @@ export default {
   connectToPeer,
   sendToPeer,
   broadcast,
-  closePeer
+  onMessage,
+  closePeer,
+  getPeerState,
+  getConnectedPeers,
+  cleanup
 }
