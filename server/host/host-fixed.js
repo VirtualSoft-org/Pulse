@@ -3,16 +3,14 @@
 const SUPABASE_URL = 'https://enbyfbrgnyfbfbrqpxos.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuYnlmYnJnbnlmYmZicnFweG9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMzQ2MjgsImV4cCI6MjA4MTgxMDYyOH0.WxFotoKNBKxg0Br31cKXuulJxB2G1CAqTlte_0O3J6Q'
 
-let sb = null
+let supabase = null
 let myUserId = null
 let roomId = '95552244-2f21-4f86-8cdc-417efc600b99'
 let peers = new Map()
 let dataChannels = new Map()
 let signalingCallbacks = {}
-let currentMembers = new Set()
 
 let logEl, msgInput, sendBtn, connectBtn, statusEl, peerListEl
-let myIdEl, membersListEl, copyIdBtn
 
 function log(msg) {
   if (!logEl) return
@@ -32,22 +30,16 @@ async function ensureSupabase() {
 async function initSupabase() {
   await ensureSupabase()
   const { createClient } = window.supabase
-  sb = createClient(SUPABASE_URL, SUPABASE_KEY)
+  supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
   
-  const { error } = await sb.auth.signInAnonymously()
+  const { error } = await supabase.auth.signInAnonymously()
   if (error) throw error
   
-  const { data } = await sb.auth.getUser()
+  const { data } = await supabase.auth.getUser()
   myUserId = data.user.id
   log(`✅ Auth: ${myUserId.substring(0, 8)}...`)
-
-  // update UI with our id if element exists
-  if (myIdEl) myIdEl.textContent = myUserId
-  if (copyIdBtn) copyIdBtn.onclick = async () => {
-    try { await navigator.clipboard.writeText(myUserId); log('Copied ID to clipboard') } catch (e) { log('Copy failed') }
-  }
   
-  const { error: joinError } = await sb
+  const { error: joinError } = await supabase
     .from('room_members')
     .insert({ room_id: roomId, user_id: myUserId })
   if (joinError && !joinError.message.includes('duplicate')) throw joinError
@@ -58,116 +50,36 @@ async function initSupabase() {
 }
 
 async function initSignaling() {
-  const channel = sb.channel(`room:${roomId}:signaling`)
+  const channel = supabase.channel(`room:${roomId}:signaling`)
   channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
     const msg = payload
-    console.debug('[host] received raw signal payload', msg)
     if (msg.to === myUserId && msg.from !== myUserId) {
-      // If client announces readiness, only initiate connection if the id is known
-      if (msg.type === 'ready') {
-        log(`📡 ready from ${msg.from.substring(0,8)}`)
-        if (currentMembers.has(msg.from)) {
-          connectToPeer(msg.from).catch(e=>{
-            console.error('[host] connectToPeer error', e)
-            log(`Error: ${e.message}`)
-          })
-        } else {
-          // try refreshing members once, then check again
-          console.debug('[host] ready from unknown member, refreshing members')
-          fetchAndRenderMembers().then(() => {
-            if (currentMembers.has(msg.from)) {
-              connectToPeer(msg.from).catch(e=>{
-                console.error('[host] connectToPeer error', e)
-                log(`Error: ${e.message}`)
-              })
-            } else {
-              log(`Ignored ready from unknown user ${msg.from.substring(0,8)}`)
-            }
-          }).catch(e=>{
-            console.error('[host] fetch members error', e)
-          })
-        }
-        return
-      }
-      log(`📡 ${msg.type} from ${msg.from.substring(0,8)}`)
+      log(`📡 ${msg.type}`)
       if (signalingCallbacks[msg.from]) {
         signalingCallbacks[msg.from](msg)
-      } else {
-        console.debug('[host] no signaling callback for', msg.from)
       }
     }
   }).subscribe()
   log('🔊 Signaling ready')
 }
 
-async function fetchAndRenderMembers() {
-  try {
-    const { data: members } = await sb
-      .from('room_members')
-      .select('user_id')
-      .eq('room_id', roomId)
-    const list = (members || []).filter(m => m && m.user_id)
-    // update current members set
-    currentMembers.clear()
-    for (const m of list) currentMembers.add(m.user_id)
-    renderMembers(list)
-  } catch (e) {
-    console.error('[host] fetch members error', e)
-  }
-}
-
-function renderMembers(members) {
-  if (!membersListEl) return
-  membersListEl.innerHTML = ''
-  const others = members.filter(m => m.user_id && m.user_id !== myUserId)
-  if (others.length === 0) {
-    membersListEl.innerHTML = '<li style="opacity:0.6">No other members</li>'
-    return
-  }
-  for (const m of others) {
-    const li = document.createElement('li')
-    li.style.display = 'flex'
-    li.style.justifyContent = 'space-between'
-    li.style.alignItems = 'center'
-    const span = document.createElement('span')
-    span.textContent = m.user_id.substring(0,8)
-    const btn = document.createElement('button')
-    btn.textContent = 'Connect'
-    // Only connect when user explicitly clicks — do not auto-connect
-    btn.onclick = () => connectToPeer(m.user_id)
-    li.appendChild(span)
-    li.appendChild(btn)
-    membersListEl.appendChild(li)
-  }
-}
-
 async function sendSignal(to, type, data) {
   const msg = { from: myUserId, to, type, data }
-  console.debug('[host] sendSignal', msg)
-  log(`➡️ Sending ${type} to ${to.substring(0,8)}`)
-  const { error } = await sb.channel(`room:${roomId}:signaling`).send('broadcast', { event: 'signal', payload: msg })
-  if (error) {
-    log(`Error: ${error.message}`)
-    console.error('[host] sendSignal error', error)
-  }
+  const { error } = await supabase.channel(`room:${roomId}:signaling`).send('broadcast', msg)
+  if (error) log(`Error: ${error.message}`)
 }
 
 async function createPeerConnection(peerId) {
-  log(`🛠 Creating RTCPeerConnection for ${peerId.substring(0,8)}`)
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   })
   
   const dc = pc.createDataChannel('data', { ordered: true })
-  log(`📨 Created datachannel for ${peerId.substring(0,8)}`)
   setupDataChannel(dc, peerId)
   dataChannels.set(peerId, dc)
   
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      console.debug('[host] ICE candidate for', peerId, event.candidate)
-      sendSignal(peerId, 'ice', event.candidate)
-    }
+    if (event.candidate) sendSignal(peerId, 'ice', event.candidate)
   }
   
   pc.ondatachannel = (event) => {
@@ -208,18 +120,12 @@ function setupDataChannel(dc, peerId) {
 }
 
 async function connectToPeer(peerId) {
-  if (peers.has(peerId)) {
-    log(`Already connected to ${peerId.substring(0,8)}`)
-    return
-  }
-  log(`Connecting to ${peerId.substring(0,8)}...`)
+  if (peers.has(peerId)) return
+  log(`Connecting...`)
   const pc = await createPeerConnection(peerId)
   const offer = await pc.createOffer()
-  log('📄 Offer created')
   await pc.setLocalDescription(offer)
-  log('📍 Local description set')
   await sendSignal(peerId, 'offer', offer)
-  log('📡 Offer sent')
 }
 
 function updatePeerList() {
@@ -240,8 +146,19 @@ async function start() {
     await initSupabase()
     await initSignaling()
     
-    // fetch members and render list; user can click Connect per-member
-    await fetchAndRenderMembers()
+    const { data: members } = await supabase
+      .from('room_members')
+      .select('user_id')
+      .eq('room_id', roomId)
+    
+    if (Array.isArray(members)) {
+      for (const m of members) {
+        if (m.user_id !== myUserId) {
+          await new Promise(r => setTimeout(r, 500))
+          await connectToPeer(m.user_id)
+        }
+      }
+    }
     
     log('✅ Ready!')
   } catch (err) {
@@ -257,9 +174,6 @@ function init() {
   connectBtn = document.getElementById('connect')
   statusEl = document.getElementById('status')
   peerListEl = document.getElementById('peerList')
-  myIdEl = document.getElementById('myId')
-  membersListEl = document.getElementById('membersList')
-  copyIdBtn = document.getElementById('copyId')
   
   if (!logEl) {
     setTimeout(init, 100)
@@ -285,15 +199,5 @@ function init() {
     }
   }
 }
-
-// Auto-start for debugging: use ?auto=1 in URL
-document.addEventListener('DOMContentLoaded', () => {
-  const params = new URLSearchParams(location.search)
-  if (params.get('auto') === '1') {
-    setTimeout(() => {
-      if (connectBtn) connectBtn.click()
-    }, 300)
-  }
-})
 
 document.addEventListener('DOMContentLoaded', init)
