@@ -20,7 +20,28 @@ import { log } from './logger'
 const wrtc = require('wrtc')
 type RTCPeerConnectionT = any
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
+function getIceServers() {
+  const servers: any[] = []
+
+  // Add TURN server from env if present
+  const turnUrl = process.env.TURN_URL
+  const turnUser = process.env.TURN_USER
+  const turnPass = process.env.TURN_PASS
+
+  if (turnUrl) {
+    const turnEntry: any = { urls: turnUrl }
+    if (turnUser && turnPass) {
+      turnEntry.username = turnUser
+      turnEntry.credential = turnPass
+    }
+    servers.push(turnEntry)
+  }
+
+  // Always include a public STUN as fallback
+  servers.push({ urls: 'stun:stun.l.google.com:19302' })
+
+  return servers
+}
 
 // Message Protocol v1
 export type RTCMessage = 
@@ -233,6 +254,10 @@ export async function connectToPeer(peerId: string) {
     await pc.setLocalDescription(offer)
     updatePeerState(peerId, 'connecting')
 
+    try {
+      log.info('webrtc', `offer created for ${peerId.substring(0,8)} type=${offer.type} size=${offer.sdp?.length || 0}`)
+    } catch {}
+
     await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
     console.log(`[webrtc] sent offer to ${peerId}`)
   } catch (e: any) {
@@ -321,13 +346,30 @@ export async function closePeer(peerId: string) {
 
 /** Internal: create RTCPeerConnection with handlers */
 function createPeerConnection(peerId: string, isInitiator: boolean): RTCPeerConnectionT {
-  const pc = new wrtc.RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const pc = new wrtc.RTCPeerConnection({ iceServers: getIceServers() })
 
   pc.onicecandidate = (ev: any) => {
     const c = ev.candidate
     if (c) {
-      sendSignal(peerId, 'ice', c).catch(e => console.error('[webrtc] send ice failed', e))
+      try {
+        // Log candidate detail for troubleshooting
+        log.debug('webrtc', `onicecandidate → ${peerId.substring(0,8)}:`, c.candidate ? c.candidate : c)
+      } catch {}
+
+      sendSignal(peerId, 'ice', c).catch(e => log.error('webrtc', '[webrtc] send ice failed', e.message))
     }
+  }
+
+  pc.onicegatheringstatechange = () => {
+    try { log.debug('webrtc', `iceGatheringState ${peerId.substring(0,8)}: ${pc.iceGatheringState}`) } catch {}
+  }
+
+  pc.onsignalingstatechange = () => {
+    try { log.debug('webrtc', `signalingState ${peerId.substring(0,8)}: ${pc.signalingState}`) } catch {}
+  }
+
+  pc.onconnectionstatechange = () => {
+    try { log.debug('webrtc', `connectionState ${peerId.substring(0,8)}: ${pc.connectionState}`) } catch {}
   }
 
   pc.oniceconnectionstatechange = () => {
@@ -446,6 +488,10 @@ async function handleOffer(from: string, offer: any) {
     await pc.setLocalDescription(answer)
     updatePeerState(from, 'connecting')
 
+    try {
+      log.info('webrtc', `answer created for ${from.substring(0,8)} type=${answer.type} size=${answer.sdp?.length || 0}`)
+    } catch {}
+
     await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
     console.log(`[webrtc] sent answer to ${from}`)
 
@@ -481,6 +527,7 @@ async function handleAnswer(from: string, answer: any) {
 
   try {
     await conn.pc.setRemoteDescription(new wrtc.RTCSessionDescription(answer))
+    try { log.info('webrtc', `setRemoteDescription(answer) for ${from.substring(0,8)} signaling=${conn.pc.signalingState}`) } catch {}
     updatePeerState(from, 'connecting')
 
     const pend = pendingCandidates.get(from) || []
