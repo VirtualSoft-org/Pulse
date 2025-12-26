@@ -23,10 +23,40 @@ export async function getCurrentHost(roomId: string): Promise<string | null> {
   return data?.host_id || null
 }
 
+export async function electHost(roomId: string, userId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('rooms')
+      .update({ host_id: userId })
+      .eq('id', roomId)
+
+    if (error) {
+      console.error('[hostElection] Error electing host:', error)
+      return false
+    }
+
+    console.log(`[hostElection] User ${userId} elected as host for room ${roomId}`)
+    return true
+  } catch (error) {
+    console.error('[hostElection] Error electing host:', error)
+    return false
+  }
+}
+
 export async function amIHost(roomId: string): Promise<boolean> {
   try {
     const userId = await ensureAuth()
+    
+    // Check if there's a current host
     const currentHost = await getCurrentHost(roomId)
+    
+    if (!currentHost) {
+      // No host exists, elect this user as host
+      await electHost(roomId, userId)
+      return true
+    }
+    
+    // Return whether this user is the current host
     return currentHost === userId
   } catch (error) {
     console.error('[hostElection] Error checking if host:', error)
@@ -67,5 +97,6 @@ export async function listenForHostChanges(
 export default {
   getCurrentHost,
   amIHost,
+  electHost,
   listenForHostChanges
 }

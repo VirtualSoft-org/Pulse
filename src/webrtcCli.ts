@@ -75,7 +75,7 @@ async function interactiveLoop() {
         }
         const peerId = parts[1]
         const msg = parts.slice(2).join(' ')
-        sendToPeer(peerId, msg)
+        sendToPeer(peerId, { type: 'chat', text: msg })
         console.log(`[CLI] sent to ${peerId}: ${msg}`)
       } else if (cmd === '/broadcast') {
         if (parts.length < 2) {
@@ -84,7 +84,7 @@ async function interactiveLoop() {
           return
         }
         const msg = parts.slice(1).join(' ')
-        broadcast(msg)
+        broadcast({ type: 'chat', text: msg })
         console.log(`[CLI] broadcast: ${msg}`)
       } else if (cmd === '/close') {
         if (parts.length < 2) {

@@ -7,6 +7,28 @@ export async function joinRoom(roomId: string, client?: SupabaseClient) {
   const userId = await ensureAuth(sb)
   console.log('Logged in as:', userId)
 
+  // First, check if room exists
+  const { data: roomExists } = await sb
+    .from('rooms')
+    .select('id')
+    .eq('id', roomId)
+    .maybeSingle()
+
+  // If room doesn't exist, create it
+  if (!roomExists) {
+    console.log(`[joinRoom] Room ${roomId} doesn't exist, creating it...`)
+    const { error: createError } = await sb
+      .from('rooms')
+      .insert({ id: roomId, host_id: userId })
+
+    if (createError) {
+      console.error('Create room failed:', createError)
+      throw createError
+    }
+    console.log(`[joinRoom] Room ${roomId} created`)
+  }
+
+  // Now join the room
   const { error } = await sb
     .from('room_members')
     .insert({
