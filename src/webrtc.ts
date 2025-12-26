@@ -37,8 +37,17 @@ function getIceServers() {
     servers.push(turnEntry)
   }
 
-  // Always include a public STUN as fallback
+  // Public TURN server fallback (for testing cross-network without credentials)
+  // Open Relay Project: https://www.openrelay.dev/
+  if (!turnUrl) {
+    servers.push({
+      urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp']
+    })
+  }
+
+  // Always include public STUN
   servers.push({ urls: 'stun:stun.l.google.com:19302' })
+  servers.push({ urls: 'stun:stun1.l.google.com:19302' })
 
   return servers
 }
