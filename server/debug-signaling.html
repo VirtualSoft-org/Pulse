@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WebRTC Signaling Debug</title>
+  <style>
+    body { font-family: monospace; background: #f0f0f0; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .panel { background: white; padding: 15px; margin: 10px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .log { background: #1e1e1e; color: #0f0; padding: 10px; border-radius: 4px; height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    button { padding: 8px 16px; margin: 5px; background: #0071e2; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    .info { padding: 10px; background: #e3f2fd; border-left: 4px solid #0071e2; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WebRTC Signaling Debug</h1>
+    
+    <div class="panel">
+      <h2>Status</h2>
+      <div id="status" class="info">Initializing...</div>
+      <div class="info">
+        <strong>Room ID:</strong> <code>95552244-2f21-4f86-8cdc-417efc600b99</code><br>
+        <strong>My ID:</strong> <code id="myId">—</code><br>
+        <strong>Role:</strong> <code id="role">—</code>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Controls</h2>
+      <button onclick="initApp()">Initialize</button>
+      <button onclick="testSignaling()">Test Signaling (send ping)</button>
+      <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="panel">
+      <h2>Signaling Log</h2>
+      <div id="log" class="log">Waiting for initialization...</div>
+    </div>
+
+    <div class="panel">
+      <h2>Raw Channel Data</h2>
+      <div id="channelLog" class="log" style="height: 200px;">—</div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://enbyfbrgnyfbfbrqpxos.supabase.co'
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuYnlmYnJnbnlmYmZicnFweG9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyMzQ2MjgsImV4cCI6MjA4MTgxMDYyOH0.WxFotoKNBKxg0Br31cKXuulJxB2G1CAqTlte_0O3J6Q'
+    const ROOM_ID = '95552244-2f21-4f86-8cdc-417efc600b99'
+
+    let sb = null
+    let myUserId = null
+    let channel = null
+
+    function log(msg) {
+      const el = document.getElementById('log')
+      const timestamp = new Date().toLocaleTimeString()
+      el.textContent += `[${timestamp}] ${msg}\n`
+      el.scrollTop = el.scrollHeight
+      console.log(msg)
+    }
+
+    function channelLog(msg) {
+      const el = document.getElementById('channelLog')
+      el.textContent += `${msg}\n`
+      el.scrollTop = el.scrollHeight
+    }
+
+    async function initApp() {
+      try {
+        log('🔄 Initializing Supabase...')
+        await new Promise(r => setTimeout(r, 500))
+        
+        const { createClient } = window.supabase
+        sb = createClient(SUPABASE_URL, SUPABASE_KEY)
+        
+        const { error: authError } = await sb.auth.signInAnonymously()
+        if (authError) throw authError
+        
+        const { data } = await sb.auth.getUser()
+        myUserId = data.user.id
+        
+        log(`✅ Authenticated as: ${myUserId}`)
+        document.getElementById('myId').textContent = myUserId
+        
+        log('📡 Subscribing to signaling channel...')
+        channel = sb.channel(`room:${ROOM_ID}:signaling`)
+        
+        channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
+          channelLog(`📥 Received: ${JSON.stringify(payload, null, 2)}`)
+          log(`📡 Signal from ${payload.from.substring(0,8)}: type=${payload.type}`)
+        })
+        
+        await channel.subscribe((status) => {
+          log(`📊 Channel status: ${status}`)
+          if (status === 'SUBSCRIBED') {
+            log('✅ Subscribed to signaling channel')
+            document.getElementById('status').innerHTML = '<strong style="color: green;">✅ Ready to send/receive signals</strong>'
+          }
+        })
+
+        log('✅ Initialization complete!')
+      } catch (err) {
+        log(`❌ Error: ${err.message}`)
+        console.error(err)
+      }
+    }
+
+    async function testSignaling() {
+      if (!channel || !myUserId) {
+        log('❌ Not initialized yet')
+        return
+      }
+
+      const testMsg = {
+        from: myUserId,
+        to: myUserId,
+        type: 'test',
+        data: { message: 'This is a test signal', timestamp: new Date().toISOString() }
+      }
+
+      log(`📤 Sending test signal: ${JSON.stringify(testMsg)}`)
+      
+      const { error } = await channel.send('broadcast', { 
+        event: 'signal', 
+        payload: testMsg 
+      })
+
+      if (error) {
+        log(`❌ Send error: ${error.message}`)
+      } else {
+        log(`✅ Test signal sent`)
+      }
+    }
+
+    function clearLog() {
+      document.getElementById('log').textContent = ''
+      document.getElementById('channelLog').textContent = ''
+    }
+
+    // Auto-initialize on page load
+    window.addEventListener('load', () => {
+      log('Page loaded, ready to initialize')
+    })
+  </script>
+</body>
+</html>

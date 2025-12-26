@@ -9,6 +9,7 @@ let roomId = '95552244-2f21-4f86-8cdc-417efc600b99'
 let peers = new Map()
 let dataChannels = new Map()
 let signalingCallbacks = {}
+let pendingSignalMessages = {} // Buffer for messages before peer callbacks are set
 let currentMembers = new Set()
 
 let logEl, msgInput, sendBtn, connectBtn, statusEl, peerListEl
@@ -62,10 +63,13 @@ async function initSignaling() {
   channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
     const msg = payload
     console.debug('[host] received raw signal payload', msg)
+    console.log(`[host] Signal check - msg.to=${msg.to}, myUserId=${myUserId}, msg.from=${msg.from}`)
+    
     if (msg.to === myUserId && msg.from !== myUserId) {
       // If client announces readiness, only initiate connection if the id is known
       if (msg.type === 'ready') {
         log(`📡 ready from ${msg.from.substring(0,8)}`)
+        console.log(`[host] Received ready, currentMembers has ${msg.from}? ${currentMembers.has(msg.from)}`)
         if (currentMembers.has(msg.from)) {
           connectToPeer(msg.from).catch(e=>{
             console.error('[host] connectToPeer error', e)
@@ -74,6 +78,7 @@ async function initSignaling() {
         } else {
           // try refreshing members once, then check again
           console.debug('[host] ready from unknown member, refreshing members')
+          log('🔄 Unknown member, refreshing list...')
           fetchAndRenderMembers().then(() => {
             if (currentMembers.has(msg.from)) {
               connectToPeer(msg.from).catch(e=>{
@@ -85,15 +90,31 @@ async function initSignaling() {
             }
           }).catch(e=>{
             console.error('[host] fetch members error', e)
+            log(`Error fetching members: ${e.message}`)
           })
         }
         return
       }
       log(`📡 ${msg.type} from ${msg.from.substring(0,8)}`)
+      console.log(`[host] Looking for callback for ${msg.from}`)
       if (signalingCallbacks[msg.from]) {
+        console.log(`[host] Found callback for ${msg.from}`)
         signalingCallbacks[msg.from](msg)
       } else {
-        console.debug('[host] no signaling callback for', msg.from)
+        // Buffer message if callback not set yet
+        console.debug('[host] buffering signal message from', msg.from, 'type:', msg.type)
+        log(`⏳ Buffered ${msg.type} from ${msg.from.substring(0,8)}`)
+        if (!pendingSignalMessages[msg.from]) {
+          pendingSignalMessages[msg.from] = []
+        }
+        pendingSignalMessages[msg.from].push(msg)
+      }
+    } else {
+      if (msg.to !== myUserId) {
+        console.log(`[host] Ignoring message not for us: to=${msg.to}`)
+      }
+      if (msg.from === myUserId) {
+        console.log('[host] Ignoring message from self')
       }
     }
   }).subscribe()
@@ -143,8 +164,14 @@ function renderMembers(members) {
 
 async function sendSignal(to, type, data) {
   const msg = { from: myUserId, to, type, data }
-  console.debug('[host] sendSignal', msg)
+  console.debug('[host] sendSignal', JSON.stringify(msg))
   log(`➡️ Sending ${type} to ${to.substring(0,8)}`)
+  
+  // Log what we're actually sending for debugging
+  if (type === 'answer' || type === 'offer') {
+    console.log(`[host] ${type} details:`, { type: data.type, sdpLength: data.sdp?.length })
+  }
+  
   const { error } = await sb.channel(`room:${roomId}:signaling`).send('broadcast', { event: 'signal', payload: msg })
   if (error) {
     log(`Error: ${error.message}`)
@@ -166,7 +193,13 @@ async function createPeerConnection(peerId) {
   pc.onicecandidate = (event) => {
     if (event.candidate) {
       console.debug('[host] ICE candidate for', peerId, event.candidate)
-      sendSignal(peerId, 'ice', event.candidate)
+      // Serialize ICE candidate properly
+      const candidate = {
+        candidate: event.candidate.candidate,
+        sdpMLineIndex: event.candidate.sdpMLineIndex,
+        sdpMid: event.candidate.sdpMid,
+      }
+      sendSignal(peerId, 'ice', candidate)
     }
   }
   
@@ -178,12 +211,35 @@ async function createPeerConnection(peerId) {
   signalingCallbacks[peerId] = async (msg) => {
     try {
       if (msg.type === 'answer') {
+        log(`📥 Answer received from ${peerId.substring(0,8)}`)
+        console.debug('[host] answer data:', msg.data)
         await pc.setRemoteDescription(new RTCSessionDescription(msg.data))
+        log('📍 Remote description set')
       } else if (msg.type === 'ice') {
-        await pc.addIceCandidate(new RTCIceCandidate(msg.data))
+        console.debug('[host] ice candidate:', msg.data)
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.data))
+          log(`❄️ ICE from ${peerId.substring(0,8)}`)
+        } catch (e) {
+          console.debug('[host] ICE candidate error (may be normal):', e)
+        }
       }
     } catch (e) {
-      console.error(e)
+      console.error('[host] Signaling callback error:', e)
+      log(`Error: ${e.message}`)
+    }
+  }
+  
+  // Flush any pending messages that arrived before callback was set
+  if (pendingSignalMessages[peerId] && pendingSignalMessages[peerId].length > 0) {
+    log(`Processing ${pendingSignalMessages[peerId].length} buffered signal(s) from ${peerId.substring(0,8)}`)
+    const messages = pendingSignalMessages[peerId].splice(0)
+    for (const msg of messages) {
+      try {
+        await signalingCallbacks[peerId](msg)
+      } catch (e) {
+        console.error('[host] Error processing buffered message:', e)
+      }
     }
   }
   
@@ -260,6 +316,7 @@ function init() {
   myIdEl = document.getElementById('myId')
   membersListEl = document.getElementById('membersList')
   copyIdBtn = document.getElementById('copyId')
+  const refreshMembersBtn = document.getElementById('refreshMembers')
   
   if (!logEl) {
     setTimeout(init, 100)
@@ -267,6 +324,23 @@ function init() {
   }
   
   connectBtn.onclick = start
+  
+  if (refreshMembersBtn) {
+    refreshMembersBtn.onclick = async () => {
+      refreshMembersBtn.disabled = true
+      refreshMembersBtn.style.opacity = '0.6'
+      try {
+        await fetchAndRenderMembers()
+        log('✅ Members list refreshed')
+      } catch (e) {
+        log(`Error refreshing members: ${e.message}`)
+      } finally {
+        refreshMembersBtn.disabled = false
+        refreshMembersBtn.style.opacity = '1'
+      }
+    }
+  }
+  
   sendBtn.onclick = () => {
     const msg = msgInput.value.trim()
     if (!msg) return

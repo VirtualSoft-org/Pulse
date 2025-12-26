@@ -9,6 +9,7 @@ let roomId = '95552244-2f21-4f86-8cdc-417efc600b99'
 let pc = null
 let dataChannel = null
 let signalingCallback = null
+let pendingSignalMessages = [] // Buffer for messages before callback is set
 let hostId = null
 let logEl, msgInput, sendBtn, connectBtn, statusEl
 let myIdEl, hostIdInput, useHostBtn, copyIdBtn
@@ -72,12 +73,25 @@ async function initSignaling() {
   channel.on('broadcast', { event: 'signal' }, ({ payload }) => {
     const msg = payload
     console.debug('[client] received raw signal payload', msg)
+    console.log(`[client] Signal check - msg.to=${msg.to}, myUserId=${myUserId}, msg.from=${msg.from}, match=${msg.to === myUserId && msg.from !== myUserId}`)
+    
     if (msg.to === myUserId && msg.from !== myUserId) {
       log(`📡 ${msg.type} from ${msg.from.substring(0,8)}`)
       if (signalingCallback) {
+        console.log('[client] Calling signalingCallback immediately')
         signalingCallback(msg)
       } else {
-        console.debug('[client] no signalingCallback set yet')
+        // Buffer message if callback not set yet
+        console.debug('[client] buffering signal message, callback not ready')
+        log(`⏳ Buffered ${msg.type} (callback not ready yet)`)
+        pendingSignalMessages.push(msg)
+      }
+    } else {
+      if (msg.to !== myUserId) {
+        console.log(`[client] Ignoring message not for us: to=${msg.to}`)
+      }
+      if (msg.from === myUserId) {
+        console.log('[client] Ignoring message from self')
       }
     }
   }).subscribe()
@@ -86,8 +100,14 @@ async function initSignaling() {
 
 async function sendSignal(to, type, data) {
   const msg = { from: myUserId, to, type, data }
-  console.debug('[client] sendSignal', msg)
+  console.debug('[client] sendSignal', JSON.stringify(msg))
   log(`➡️ Sending ${type} to ${to.substring(0,8)}`)
+  
+  // Log what we're actually sending for debugging
+  if (type === 'answer' || type === 'offer') {
+    console.log(`[client] ${type} details:`, { type: data.type, sdpLength: data.sdp?.length })
+  }
+  
   const { error } = await sb.channel(`room:${roomId}:signaling`).send('broadcast', { event: 'signal', payload: msg })
   if (error) {
     log(`Error: ${error.message}`)
@@ -105,7 +125,13 @@ async function createPeerConnection(hostIdParam) {
   pc.onicecandidate = (event) => {
     if (event.candidate) {
       console.debug('[client] ICE candidate', event.candidate)
-      sendSignal(hostId, 'ice', event.candidate)
+      // Serialize ICE candidate properly
+      const candidate = {
+        candidate: event.candidate.candidate,
+        sdpMLineIndex: event.candidate.sdpMLineIndex,
+        sdpMid: event.candidate.sdpMid,
+      }
+      sendSignal(hostId, 'ice', candidate)
     }
   }
   
@@ -117,21 +143,43 @@ async function createPeerConnection(hostIdParam) {
   signalingCallback = async (msg) => {
     try {
       if (msg.type === 'offer') {
-        log('[client] Received offer')
+        log(`📨 Received offer from ${msg.from.substring(0,8)}`)
+        console.debug('[client] offer data:', msg.data)
+        // Use RTCSessionDescription without new keyword in newer browsers
         await pc.setRemoteDescription(new RTCSessionDescription(msg.data))
-        log('[client] Remote description set')
+        log('📍 Remote description set')
         const answer = await pc.createAnswer()
-        log('[client] Answer created')
+        log('📋 Answer created')
         await pc.setLocalDescription(answer)
-        log('[client] Local description set')
-        await sendSignal(hostId, 'answer', answer)
-        log('[client] Answer sent')
+        log('📍 Local description set')
+        // Serialize answer properly
+        await sendSignal(hostId, 'answer', { type: answer.type, sdp: answer.sdp })
+        log('📤 Answer sent')
       } else if (msg.type === 'ice') {
-        log('[client] ICE candidate received')
-        await pc.addIceCandidate(new RTCIceCandidate(msg.data))
+        console.debug('[client] ice candidate:', msg.data)
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.data))
+          log('❄️ ICE candidate added')
+        } catch (e) {
+          console.debug('[client] ICE candidate error (may be normal):', e)
+        }
       }
     } catch (e) {
-      console.error(e)
+      console.error('[client] Signaling callback error:', e)
+      log(`Error processing signal: ${e.message}`)
+    }
+  }
+
+  // Flush any pending messages that arrived before callback was set
+  if (pendingSignalMessages.length > 0) {
+    log(`Processing ${pendingSignalMessages.length} buffered signal(s)`)
+    const messages = pendingSignalMessages.splice(0)
+    for (const msg of messages) {
+      try {
+        await signalingCallback(msg)
+      } catch (e) {
+        console.error('[client] Error processing buffered message:', e)
+      }
     }
   }
 }

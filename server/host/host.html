@@ -170,7 +170,10 @@
       
       <div class="panel">
         <h2>Connected Peers</h2>
-        <h3 style="margin-top:0.25rem">Known Members</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="margin: 0;">Known Members</h3>
+          <button id="refreshMembers" type="button" style="padding: 8px 12px; font-size: 0.9rem; width: auto;">🔄 Refresh</button>
+        </div>
         <ul id="membersList" class="peer-list">
           <li style="opacity: 0.5;">No members yet</li>
         </ul>

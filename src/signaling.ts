@@ -12,6 +12,7 @@ type SignalMessage = {
 
 let channel: any = null
 let privateChannel: any = null
+const privateChannels: Map<string, any> = new Map()
 let myUserId: string | null = null
 let roomTopic: string | null = null
 const listeners: Array<(msg: SignalMessage) => void> = []
@@ -120,29 +121,38 @@ export async function sendSignal(to: string, type: SignalType, data: any) {
     return
   }
 
-  const msg: SignalMessage = { from: myUserId, to, type, data }
-  console.log(`[signaling] sending ${type} → ${to}`)
+  // Serialize ICE candidates properly
+  let serializedData = data
+  if (type === 'ice' && data) {
+    serializedData = {
+      candidate: data.candidate,
+      sdpMLineIndex: data.sdpMLineIndex,
+      sdpMid: data.sdpMid,
+    }
+  }
+
+  const msg: SignalMessage = { from: myUserId, to, type, data: serializedData }
+  console.log(`[signaling] sending ${type} → ${to.substring(0, 8)}`)
 
   if (type === 'host-elected') {
     if (!channel) throw new Error('room channel not initialized')
     return await channel.send({ type: 'broadcast', event: 'host-update', payload: msg })
   } else {
-    // FIX: Cache channels instead of creating new ones each time
-    const userChannel = supabase.channel(getUserChannelName(to), {
-      config: { broadcast: { self: false } }
-    })
-    
-    try {
-      const res = await userChannel.send({ 
-        type: 'broadcast', 
-        event: 'signal', 
-        payload: msg 
+    // Cache private channels so we reuse subscriptions and ensure messages are delivered
+    let userChannel = privateChannels.get(to)
+    if (!userChannel) {
+      userChannel = supabase.channel(getUserChannelName(to), { config: { broadcast: { self: false } } })
+      privateChannels.set(to, userChannel)
+      // subscribe immediately (fire-and-forget)
+      userChannel.subscribe((status: any, err?: Error) => {
+        if (err) console.warn('[signaling] private channel subscribe error for', to, err)
+        else if (status === 'SUBSCRIBED') console.log('[signaling] private channel subscribed for', to)
       })
-      console.log('[signaling] sent to private channel')
-      // FIX: Unsubscribe after sending to prevent memory leak
-      setTimeout(() => {
-        userChannel.unsubscribe().catch(() => {})
-      }, 1000)
+    }
+
+    try {
+      const res = await userChannel.send({ type: 'broadcast', event: 'signal', payload: msg })
+      console.log('[signaling] sent to private channel', to.substring(0, 8))
       return res
     } catch (e) {
       console.error('[signaling] send to private channel failed', e)

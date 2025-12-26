@@ -13,6 +13,7 @@
 import { initWebRTC, connectToPeer, sendToPeer, broadcast, closePeer } from './webrtc'
 import { initSignaling } from './signaling'
 import { joinRoom } from './joinRoom'
+import { joinPresence } from './presence'
 import * as readline from 'node:readline'
 
 const roomId = process.env.ROOM_ID ?? process.argv[2]
@@ -120,6 +121,9 @@ async function main() {
   try {
     console.log(`[CLI] joining room ${roomId}...`)
     await joinRoom(roomId)
+
+    console.log(`[CLI] joining presence for room ${roomId}...`)
+    await joinPresence(roomId, 'member')
 
     console.log(`[CLI] initializing signaling for room ${roomId}...`)
     await initSignaling(roomId)

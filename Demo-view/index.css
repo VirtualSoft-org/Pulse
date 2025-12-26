@@ -233,13 +233,139 @@ body {
     background: #555;
 }
 
+/* Members Section */
+.members-section {
+    width: 280px;
+    background-color: #1a1a1a;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    border: 1px solid #2a2a2a;
+}
+
+.members-header {
+    padding: 16px;
+    border-bottom: 1px solid #2a2a2a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.members-header h3 {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.refresh-btn {
+    background: none;
+    border: none;
+    color: #0071e2;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.refresh-btn:hover {
+    background-color: rgba(0, 113, 226, 0.15);
+    transform: rotate(20deg);
+}
+
+.refresh-btn:active {
+    transform: rotate(20deg) scale(0.95);
+}
+
+.refresh-btn.loading {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.members-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.member-item {
+    padding: 12px;
+    background-color: #252525;
+    border-radius: 8px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background-color 0.2s ease;
+}
+
+.member-item:hover {
+    background-color: #2a2a2a;
+}
+
+.member-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.member-status.online {
+    background-color: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.member-status.offline {
+    background-color: #6b7280;
+}
+
+.member-name {
+    color: #e0e0e0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.members-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.members-list::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.members-list::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+
+.members-list::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
     .main-content {
         flex-direction: column;
     }
     
-    .chat-section {
+    .chat-section,
+    .members-section {
         width: 100%;
         max-height: 300px;
     }
@@ -257,5 +383,10 @@ body {
     .main-content {
         padding: 15px 20px;
         gap: 15px;
+    }
+    
+    .chat-section,
+    .members-section {
+        width: 100%;
     }
 }

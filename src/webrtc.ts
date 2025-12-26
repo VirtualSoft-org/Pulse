@@ -14,6 +14,7 @@ import { supabase } from './supabase'
 import { ensureAuth } from './auth'
 import { sendSignal, onSignal } from './signaling'
 import { amIHost, listenForHostChanges } from './hostElection'
+import { log } from './logger'
 
 // Use dynamic import typing to avoid compile issues if wrtc is not present at type-check time
 const wrtc = require('wrtc')
@@ -141,10 +142,11 @@ async function setupRoomMembersSubscription(roomId: string) {
     },
     (payload: any) => {
       const newUserId = payload.new.user_id
+      log.debug('webrtc', `INSERT event: new member ${newUserId.substring(0, 8)}`)
       if (newUserId !== myUserId && isHost) {
-        console.log(`[webrtc] New member joined: ${newUserId}, auto-connecting...`)
+        log.info('webrtc', `New member joined: ${newUserId.substring(0, 8)}, auto-connecting...`)
         connectToPeer(newUserId).catch(e => 
-          console.error(`[webrtc] Failed to auto-connect to ${newUserId}:`, e)
+          log.error('webrtc', `Failed to auto-connect to ${newUserId.substring(0, 8)}:`, e.message)
         )
       }
     }
@@ -160,10 +162,11 @@ async function setupRoomMembersSubscription(roomId: string) {
     },
     (payload: any) => {
       const leftUserId = payload.old.user_id
+      log.debug('webrtc', `DELETE event: member left ${leftUserId.substring(0, 8)}`)
       if (leftUserId !== myUserId) {
-        console.log(`[webrtc] Member left: ${leftUserId}, cleaning up...`)
+        log.info('webrtc', `Member left: ${leftUserId.substring(0, 8)}, cleaning up...`)
         closePeer(leftUserId).catch(e =>
-          console.error(`[webrtc] Failed to clean up ${leftUserId}:`, e)
+          log.error('webrtc', `Failed to clean up ${leftUserId.substring(0, 8)}:`, e.message)
         )
       }
     }
@@ -176,7 +179,7 @@ async function setupRoomMembersSubscription(roomId: string) {
     })
   })
   
-  console.log(`[webrtc] Subscribed to room members for ${roomId}`)
+  log.info('webrtc', `Subscribed to room members for ${roomId}`)
 }
 
 /** Connect to all existing peers (host only) */
@@ -241,19 +244,60 @@ export async function connectToPeer(peerId: string) {
 /** Send a typed message to peer */
 export function sendToPeer(peerId: string, message: RTCMessage) {
   const conn = peerConnections.get(peerId)
-  if (!conn || !conn.dc) throw new Error('no data channel for peer')
-  if (conn.dc.readyState !== 'open') throw new Error('datachannel not open')
-  if (conn.state !== 'connected') throw new Error('peer not connected')
+  if (!conn) {
+    const err = `No connection for peer ${peerId}`
+    log.error('webrtc', err)
+    throw new Error(err)
+  }
+  if (!conn.dc) {
+    const err = `No datachannel for peer ${peerId}`
+    log.error('webrtc', err)
+    throw new Error(err)
+  }
+  if (conn.dc.readyState !== 'open') {
+    const err = `DataChannel not open for ${peerId} (state: ${conn.dc.readyState})`
+    log.error('webrtc', err)
+    throw new Error(err)
+  }
+  if (conn.state !== 'connected') {
+    const err = `Peer not in connected state (state: ${conn.state})`
+    log.error('webrtc', err)
+    throw new Error(err)
+  }
   
-  conn.dc.send(JSON.stringify(message))
+  try {
+    conn.dc.send(JSON.stringify(message))
+    log.debug('webrtc', `sent to ${peerId}:`, message)
+  } catch (e) {
+    log.error('webrtc', `sendToPeer failed for ${peerId}:`, e)
+    throw e
+  }
 }
 
 /** Broadcast a typed message to all connected peers */
 export function broadcast(message: RTCMessage) {
+  let sent = 0
+  const errors: string[] = []
+  
   for (const [peerId, conn] of peerConnections.entries()) {
     if (conn.dc && conn.dc.readyState === 'open' && conn.state === 'connected') {
-      conn.dc.send(JSON.stringify(message))
+      try {
+        conn.dc.send(JSON.stringify(message))
+        sent++
+      } catch (e) {
+        errors.push(`${peerId}: ${e}`)
+      }
     }
+  }
+  
+  if (sent === 0) {
+    log.warn('webrtc', `broadcast to 0 peers (${peerConnections.size} total connections)`)
+  } else {
+    log.info('webrtc', `broadcast to ${sent} peer(s)`)
+  }
+  
+  if (errors.length > 0) {
+    log.error('webrtc', `broadcast errors: ${errors.join('; ')}`)
   }
 }
 
@@ -394,7 +438,10 @@ async function handleOffer(from: string, offer: any) {
   peerConnections.set(from, conn)
 
   try {
+    console.log(`[webrtc] Setting remote description from ${from}`)
     await pc.setRemoteDescription(new wrtc.RTCSessionDescription(offer))
+    console.log(`[webrtc] Remote description set, creating answer`)
+    
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     updatePeerState(from, 'connecting')
@@ -402,12 +449,19 @@ async function handleOffer(from: string, offer: any) {
     await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
     console.log(`[webrtc] sent answer to ${from}`)
 
+    // Flush pending ICE candidates
     const pend = pendingCandidates.get(from) || []
+    console.log(`[webrtc] Flushing ${pend.length} pending ICE candidates for ${from}`)
     for (const cand of pend) {
       try {
-        await pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
-      } catch (e) {
-        console.warn('[webrtc] addIceCandidate error (pending flush)', e)
+        const iceCandidate = new wrtc.RTCIceCandidate({
+          candidate: cand.candidate,
+          sdpMLineIndex: cand.sdpMLineIndex,
+          sdpMid: cand.sdpMid,
+        })
+        await pc.addIceCandidate(iceCandidate)
+      } catch (e: any) {
+        console.warn(`[webrtc] addIceCandidate error (pending flush):`, e.message)
       }
     }
     pendingCandidates.set(from, [])
@@ -448,15 +502,23 @@ async function handleAnswer(from: string, answer: any) {
 async function handleRemoteIce(from: string, cand: any) {
   const conn = peerConnections.get(from)
   if (!conn) {
+    console.log(`[webrtc] No PC yet for ${from}, queuing ICE candidate`)
     const arr = pendingCandidates.get(from) || []
     arr.push(cand)
     pendingCandidates.set(from, arr)
     return
   }
   try {
-    await conn.pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
-  } catch (e) {
-    console.warn('[webrtc] addIceCandidate failed', e)
+    // Create RTCIceCandidate with proper fields
+    const iceCandidate = new wrtc.RTCIceCandidate({
+      candidate: cand.candidate,
+      sdpMLineIndex: cand.sdpMLineIndex,
+      sdpMid: cand.sdpMid,
+    })
+    await conn.pc.addIceCandidate(iceCandidate)
+    console.log(`[webrtc] Added ICE candidate from ${from}`)
+  } catch (e: any) {
+    console.warn(`[webrtc] addIceCandidate failed for ${from}:`, e.message)
   }
 }
 
