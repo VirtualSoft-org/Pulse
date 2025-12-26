@@ -229,6 +229,30 @@ async function connectToExistingPeers() {
   }
 }
 
+/** Wait for ICE gathering to complete (up to timeout) */
+function waitForIceGathering(pc: RTCPeerConnectionT, timeoutMs: number = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    if (pc.iceGatheringState === 'complete') {
+      resolve()
+      return
+    }
+    
+    const timer = setTimeout(() => {
+      resolve() // timeout is OK, we'll continue
+    }, timeoutMs)
+    
+    const onStateChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        clearTimeout(timer)
+        pc.removeEventListener('icegatheringstatechange', onStateChange)
+        resolve()
+      }
+    }
+    
+    pc.addEventListener('icegatheringstatechange', onStateChange)
+  })
+}
+
 /** Host: create a peer connection and send an offer to peerId. */
 export async function connectToPeer(peerId: string) {
   if (!myUserId) throw new Error('not initialized')
@@ -272,6 +296,11 @@ export async function connectToPeer(peerId: string) {
     try {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
+      
+      // Wait for initial ICE gathering (helps with candidate timing)
+      log.debug('webrtc', `Waiting for ICE gathering for ${peerId.substring(0,8)}...`)
+      await waitForIceGathering(pc, 2000)
+      
       updatePeerState(peerId, 'connecting')
 
       try {
@@ -279,7 +308,7 @@ export async function connectToPeer(peerId: string) {
       } catch {}
 
       await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
-      console.log(`[webrtc] sent offer to ${peerId}`)
+      log.debug('webrtc', `sent offer to ${peerId.substring(0,8)}`)
     } catch (e: any) {
       updatePeerState(peerId, 'failed', `Failed to create offer: ${e.message}`)
       throw e
@@ -520,11 +549,15 @@ async function handleOffer(from: string, offer: any) {
     } catch {}
 
     await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
-    console.log(`[webrtc] sent answer to ${from}`)
+    log.debug('webrtc', `sent answer to ${from.substring(0,8)}`)
+
+    // Wait a short time to allow more candidates to arrive before flushing
+    log.debug('webrtc', `Waiting for incoming ICE candidates for ${from.substring(0,8)}...`)
+    await new Promise(r => setTimeout(r, 100))
 
     // Flush pending ICE candidates
     const pend = pendingCandidates.get(from) || []
-    console.log(`[webrtc] Flushing ${pend.length} pending ICE candidates for ${from}`)
+    log.debug('webrtc', `Flushing ${pend.length} pending ICE candidates for ${from.substring(0,8)}`)
     for (const cand of pend) {
       try {
         const iceCandidate = new wrtc.RTCIceCandidate({
@@ -534,7 +567,7 @@ async function handleOffer(from: string, offer: any) {
         })
         await pc.addIceCandidate(iceCandidate)
       } catch (e: any) {
-        console.warn(`[webrtc] addIceCandidate error (pending flush):`, e.message)
+        log.debug('webrtc', `addIceCandidate error for ${from.substring(0,8)}:`, e.message)
       }
     }
     pendingCandidates.set(from, [])
@@ -554,15 +587,20 @@ async function handleAnswer(from: string, answer: any) {
 
   try {
     await conn.pc.setRemoteDescription(new wrtc.RTCSessionDescription(answer))
-    try { log.info('webrtc', `setRemoteDescription(answer) for ${from.substring(0,8)} signaling=${conn.pc.signalingState}`) } catch {}
+    log.debug('webrtc', `setRemoteDescription(answer) for ${from.substring(0,8)} signaling=${conn.pc.signalingState}`)
     updatePeerState(from, 'connecting')
 
+    // Wait for candidates to arrive before flushing
+    log.debug('webrtc', `Waiting for ICE candidates for ${from.substring(0,8)}...`)
+    await new Promise(r => setTimeout(r, 150))
+
     const pend = pendingCandidates.get(from) || []
+    log.debug('webrtc', `Flushing ${pend.length} candidates for ${from.substring(0,8)}`)
     for (const cand of pend) {
       try {
         await conn.pc.addIceCandidate(new wrtc.RTCIceCandidate(cand))
-      } catch (e) {
-        console.warn('[webrtc] addIceCandidate error (pending flush)', e)
+      } catch (e: any) {
+        log.debug('webrtc', `addIceCandidate error for ${from.substring(0,8)}:`, e.message)
       }
     }
     pendingCandidates.set(from, [])
