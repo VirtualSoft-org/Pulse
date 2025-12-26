@@ -37,17 +37,17 @@ function getIceServers() {
     servers.push(turnEntry)
   }
 
-  // Public TURN server fallback (for testing cross-network without credentials)
-  // Open Relay Project: https://www.openrelay.dev/
-  if (!turnUrl) {
-    servers.push({
-      urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp']
-    })
-  }
-
-  // Always include public STUN
+  // Always include public STUN (most reliable)
   servers.push({ urls: 'stun:stun.l.google.com:19302' })
   servers.push({ urls: 'stun:stun1.l.google.com:19302' })
+
+  // Optional: Add public TURN server (openrelay) if no custom TURN
+  // Note: OpenRelay may have issues with wrtc on some systems; comment out if it causes PC creation to hang
+  // if (!turnUrl) {
+  //   servers.push({
+  //     urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443']
+  //   })
+  // }
 
   return servers
 }
@@ -243,34 +243,49 @@ export async function connectToPeer(peerId: string) {
     return
   }
 
-  updatePeerState(peerId, 'offering')
-  
-  const pc = createPeerConnection(peerId, true)
-  const dc = pc.createDataChannel('data')
-  
-  peerConnections.set(peerId, {
-    pc,
-    dc,
-    state: 'offering',
-    retryCount: 0,
-    lastError: null
-  })
-
-  setupDataChannel(peerId, dc)
-
   try {
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-    updatePeerState(peerId, 'connecting')
+    updatePeerState(peerId, 'offering')
+    
+    const pc = createPeerConnection(peerId, true)
+    
+    // Validate PC state before creating data channel
+    if (pc.signalingState === 'closed') {
+      const err = `PC created with signalingState='closed' for ${peerId}`
+      log.error('webrtc', err)
+      updatePeerState(peerId, 'failed', err)
+      throw new Error(err)
+    }
+
+    log.debug('webrtc', `Creating data channel for ${peerId.substring(0,8)}, signalingState=${pc.signalingState}`)
+    const dc = pc.createDataChannel('data')
+    
+    peerConnections.set(peerId, {
+      pc,
+      dc,
+      state: 'offering',
+      retryCount: 0,
+      lastError: null
+    })
+
+    setupDataChannel(peerId, dc)
 
     try {
-      log.info('webrtc', `offer created for ${peerId.substring(0,8)} type=${offer.type} size=${offer.sdp?.length || 0}`)
-    } catch {}
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      updatePeerState(peerId, 'connecting')
 
-    await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
-    console.log(`[webrtc] sent offer to ${peerId}`)
+      try {
+        log.info('webrtc', `offer created for ${peerId.substring(0,8)} type=${offer.type} size=${offer.sdp?.length || 0}`)
+      } catch {}
+
+      await sendSignal(peerId, 'offer', { type: offer.type, sdp: offer.sdp })
+      console.log(`[webrtc] sent offer to ${peerId}`)
+    } catch (e: any) {
+      updatePeerState(peerId, 'failed', `Failed to create offer: ${e.message}`)
+      throw e
+    }
   } catch (e: any) {
-    updatePeerState(peerId, 'failed', `Failed to create offer: ${e.message}`)
+    log.error('webrtc', `connectToPeer(${peerId.substring(0,8)}) failed:`, e.message)
     throw e
   }
 }
@@ -355,7 +370,10 @@ export async function closePeer(peerId: string) {
 
 /** Internal: create RTCPeerConnection with handlers */
 function createPeerConnection(peerId: string, isInitiator: boolean): RTCPeerConnectionT {
+  log.debug('webrtc', `createPeerConnection for ${peerId.substring(0,8)}, isInitiator=${isInitiator}`)
   const pc = new wrtc.RTCPeerConnection({ iceServers: getIceServers() })
+  
+  log.debug('webrtc', `PC created for ${peerId.substring(0,8)}, signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`)
 
   pc.onicecandidate = (ev: any) => {
     const c = ev.candidate
