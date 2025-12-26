@@ -229,30 +229,6 @@ async function connectToExistingPeers() {
   }
 }
 
-/** Wait for ICE gathering to complete (up to timeout) */
-function waitForIceGathering(pc: RTCPeerConnectionT, timeoutMs: number = 5000): Promise<void> {
-  return new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') {
-      resolve()
-      return
-    }
-    
-    const timer = setTimeout(() => {
-      resolve() // timeout is OK, we'll continue
-    }, timeoutMs)
-    
-    const onStateChange = () => {
-      if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timer)
-        pc.removeEventListener('icegatheringstatechange', onStateChange)
-        resolve()
-      }
-    }
-    
-    pc.addEventListener('icegatheringstatechange', onStateChange)
-  })
-}
-
 /** Host: create a peer connection and send an offer to peerId. */
 export async function connectToPeer(peerId: string) {
   if (!myUserId) throw new Error('not initialized')
@@ -296,11 +272,6 @@ export async function connectToPeer(peerId: string) {
     try {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      
-      // Wait for initial ICE gathering (helps with candidate timing)
-      log.debug('webrtc', `Waiting for ICE gathering for ${peerId.substring(0,8)}...`)
-      await waitForIceGathering(pc, 2000)
-      
       updatePeerState(peerId, 'connecting')
 
       try {
@@ -551,11 +522,7 @@ async function handleOffer(from: string, offer: any) {
     await sendSignal(from, 'answer', { type: answer.type, sdp: answer.sdp })
     log.debug('webrtc', `sent answer to ${from.substring(0,8)}`)
 
-    // Wait a short time to allow more candidates to arrive before flushing
-    log.debug('webrtc', `Waiting for incoming ICE candidates for ${from.substring(0,8)}...`)
-    await new Promise(r => setTimeout(r, 100))
-
-    // Flush pending ICE candidates
+    // Flush pending ICE candidates immediately
     const pend = pendingCandidates.get(from) || []
     log.debug('webrtc', `Flushing ${pend.length} pending ICE candidates for ${from.substring(0,8)}`)
     for (const cand of pend) {
@@ -590,10 +557,7 @@ async function handleAnswer(from: string, answer: any) {
     log.debug('webrtc', `setRemoteDescription(answer) for ${from.substring(0,8)} signaling=${conn.pc.signalingState}`)
     updatePeerState(from, 'connecting')
 
-    // Wait for candidates to arrive before flushing
-    log.debug('webrtc', `Waiting for ICE candidates for ${from.substring(0,8)}...`)
-    await new Promise(r => setTimeout(r, 150))
-
+    // Flush pending candidates immediately
     const pend = pendingCandidates.get(from) || []
     log.debug('webrtc', `Flushing ${pend.length} candidates for ${from.substring(0,8)}`)
     for (const cand of pend) {
