@@ -33,7 +33,7 @@
   .pill.connected .dot { background: var(--ok); }
   .pill.reconnecting .dot { background: var(--warn); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
-  #members { display: flex; gap: 4px; margin-left: auto; }
+  #members { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
   .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 
   #layout { flex: 1; display: flex; min-height: 0; }
