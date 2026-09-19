@@ -1,0 +1,260 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151c; --panel2: #191d27; --line: #262b36;
+    --text: #e8eaf0; --dim: #8890a0; --accent: #6ea8ff; --accent2: #4d7fd6;
+    --ok: #3ddc84; --warn: #f5c542; --bad: #ff5d5d;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+  /* ---- splash ---- */
+  #splash { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  #splash form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; width: 300px; display: flex; flex-direction: column; gap: 12px; }
+  #splash h1 { margin: 0 0 4px; font-size: 20px; display: flex; align-items: center; gap: 8px; }
+  #splash h1 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  #splash p { margin: 0 0 8px; color: var(--dim); font-size: 13px; }
+  #splash input { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+  #splash button { background: var(--accent); border: none; color: #0b0d12; font-weight: 600; padding: 10px; border-radius: 8px; cursor: pointer; }
+  #splash button:hover { background: var(--accent2); color: #fff; }
+  #splashErr { color: var(--bad); font-size: 13px; min-height: 16px; }
+
+  /* ---- app shell ---- */
+  #app { display: none; height: 100vh; flex-direction: column; }
+  #app.show { display: flex; }
+  #topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #topbar b { font-size: 14px; }
+  .pill { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); padding: 4px 10px; border-radius: 20px; background: var(--panel2); }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); }
+  .pill.connected .dot { background: var(--ok); }
+  .pill.reconnecting .dot { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  #members { display: flex; gap: 4px; margin-left: auto; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+
+  #layout { flex: 1; display: flex; min-height: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
+  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; }
+  video { width: 100%; height: 100%; border-radius: 10px; background: #000; }
+  #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
+  #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.busy { color: var(--warn); }
+  #toast { font-size: 12px; color: var(--dim); }
+
+  #side { width: 280px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+  #chat { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .msg { max-width: 90%; padding: 6px 10px; border-radius: 10px; background: var(--panel2); font-size: 13px; line-height: 1.35; }
+  .msg.me { align-self: flex-end; background: var(--accent2); color: #fff; }
+  .msg .who { font-size: 10px; color: var(--dim); margin-bottom: 2px; }
+  .msg.me .who { color: rgba(255,255,255,.7); }
+  .sys { align-self: center; color: var(--dim); font-size: 11px; }
+  #chatbar { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
+  #chatbar input { flex: 1; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; border-radius: 8px; }
+  #chatbar button { background: var(--accent); border: none; color: #0b0d12; font-weight: 600; padding: 0 14px; border-radius: 8px; cursor: pointer; }
+
+  @media (max-width: 720px) {
+    #layout { flex-direction: column; }
+    #side { width: 100%; height: 220px; border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+
+<div id="splash">
+  <form id="joinForm">
+    <h1><span class="dot"></span> Pulse</h1>
+    <p>Watch your own local copy, together.</p>
+    <input id="room" placeholder="room name" required>
+    <input id="nick" placeholder="your name" required>
+    <input id="pass" placeholder="passphrase (share with friends)">
+    <button type="submit">Join room</button>
+    <div id="splashErr"></div>
+  </form>
+</div>
+
+<div id="app">
+  <div id="topbar">
+    <b id="roomLabel"></b>
+    <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
+    <div id="members"></div>
+  </div>
+
+  <div id="layout">
+    <div id="main">
+      <div id="dropzone">
+        <video id="v" controls></video>
+        <div id="hint">
+          <span>Drop your local video file here</span>
+          <button id="pickFile">Choose file…</button>
+        </div>
+      </div>
+      <div class="bar">
+        <button class="btn" id="sync">🔄 One-time Sync</button>
+        <button class="btn" id="restart">⏮ Restart from 0</button>
+        <span id="toast"></span>
+      </div>
+      <input id="file" type="file" accept="video/*" style="display:none">
+    </div>
+
+    <div id="side">
+      <div id="chat"></div>
+      <div id="chatbar">
+        <input id="msg" placeholder="Message…">
+        <button id="send">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes } from './pulse.js'
+import { hashFrame, findOffset } from './fingerprint.js'
+
+const $ = id => document.getElementById(id)
+const v = $('v'), chat = $('chat'), toast = $('toast')
+let offset = 0, applying = false, connected = false, fileKey = null
+
+// ---------- persistence ----------
+const remembered = {
+  room: localStorage.getItem('pulse.room') || '',
+  nick: localStorage.getItem('pulse.nick') || '',
+  pass: localStorage.getItem('pulse.pass') || '',
+}
+$('room').value = remembered.room
+$('nick').value = remembered.nick
+$('pass').value = remembered.pass
+
+function savePos() {
+  if (!fileKey || !v.duration) return
+  localStorage.setItem(fileKey, v.currentTime.toFixed(1))
+}
+setInterval(savePos, 4000)
+
+// ---------- chat/system log ----------
+function bubble(name, text, mine) {
+  chat.insertAdjacentHTML('beforeend',
+    `<div class="msg ${mine ? 'me' : ''}"><div class="who">${mine ? 'you' : name}</div>${text}</div>`)
+  chat.scrollTop = 1e9
+}
+function sys(text) {
+  chat.insertAdjacentHTML('beforeend', `<div class="sys">${text}</div>`)
+  chat.scrollTop = 1e9
+}
+function say(text, ms = 4000) {
+  toast.textContent = text
+  clearTimeout(say._t)
+  say._t = setTimeout(() => { if (toast.textContent === text) toast.textContent = '' }, ms)
+}
+
+// ---------- status pill ----------
+function setStatus(state) {
+  const pill = $('status')
+  pill.className = 'pill ' + state
+  $('statusText').textContent = { connected: 'live', reconnecting: 'reconnecting…' }[state] || state
+}
+
+// ---------- file loading ----------
+function loadFile(f) {
+  if (!f) return
+  v.src = URL.createObjectURL(f)
+  fileKey = `pulse.pos.${f.name}.${f.size}`
+  v.onloadedmetadata = () => {
+    const saved = parseFloat(localStorage.getItem(fileKey))
+    if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
+    v.onloadedmetadata = null
+  }
+  $('hint').style.display = 'none'
+}
+function fmt(s) { return new Date(s * 1000).toISOString().substr(11, 8) }
+
+$('pickFile').onclick = () => $('file').click()
+$('file').onchange = e => loadFile(e.target.files[0])
+;['dragover', 'drop'].forEach(ev => $('dropzone').addEventListener(ev, e => e.preventDefault()))
+$('dropzone').addEventListener('drop', e => loadFile(e.dataTransfer.files[0]))
+
+// ---------- join ----------
+$('joinForm').onsubmit = async e => {
+  e.preventDefault()
+  const room = $('room').value.trim(), nick = $('nick').value.trim(), pass = $('pass').value.trim()
+  localStorage.setItem('pulse.room', room)
+  localStorage.setItem('pulse.nick', nick)
+  localStorage.setItem('pulse.pass', pass)
+  $('splashErr').textContent = ''
+  try {
+    await connect(room, nick, pass, {
+      onEvent,
+      onMembers: names => {
+        $('members').innerHTML = names.map(n =>
+          `<div class="avatar" title="${n}">${n.slice(0, 2).toUpperCase()}</div>`).join('')
+      },
+      onStatus: setStatus,
+    })
+    connected = true
+    $('roomLabel').textContent = room
+    $('splash').style.display = 'none'
+    $('app').classList.add('show')
+  } catch (err) {
+    $('splashErr').textContent = 'Could not connect: ' + err.message
+  }
+}
+
+// ---------- sync protocol ----------
+function onEvent(e) {
+  if (e.t === 'chat') return bubble(e.name, escapeHtml(e.text), false)
+
+  if (e.t === 'play') {
+    const lag = Math.min(2, Math.max(0, (Date.now() - e.sentAt) / 1000))
+    const target = e.at + offset + lag
+    applying = true
+    if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
+    v.play().catch(() => {}).finally(() => setTimeout(() => applying = false, 250))
+    sys(`${e.name} pressed play`)
+  }
+  if (e.t === 'pause') {
+    applying = true
+    v.pause()
+    const target = e.at + offset
+    if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
+    setTimeout(() => applying = false, 250)
+    sys(`${e.name} paused`)
+  }
+  if (e.t === 'sync_req') runSync(e)
+  if (e.t === 'sync_res') sys(e.ok ? `${e.name} synced (${e.offset.toFixed(2)}s offset)` : `${e.name} couldn't find a match`)
+}
+
+async function runSync(e) {
+  const btn = $('sync')
+  btn.classList.add('busy'); btn.textContent = '🔄 Syncing…'
+  const r = await findOffset(v, e.hash)
+  if (r.ok) { offset = r.localTime - e.at; say(`Synced — offset ${offset.toFixed(2)}s`) }
+  else say('No matching scene found nearby')
+  btn.classList.remove('busy'); btn.textContent = '🔄 One-time Sync'
+  sendSyncRes(e.from, r.ok, offset)
+}
+
+v.addEventListener('play',  () => { if (connected && !applying) sendPlay(v.currentTime - offset) })
+v.addEventListener('pause', () => { if (connected && !applying) sendPause(v.currentTime - offset) })
+
+$('sync').onclick = () => {
+  const h = hashFrame(v)
+  if (!h) return say('Load a video first')
+  sendSyncReq(h, v.currentTime - offset)
+  say('Sync request sent')
+}
+$('restart').onclick = () => { v.currentTime = 0; if (fileKey) localStorage.removeItem(fileKey) }
+
+function post() {
+  const box = $('msg'), text = box.value.trim()
+  if (!connected || !text) return
+  sendChat(text); bubble('', escapeHtml(text), true); box.value = ''
+}
+$('send').onclick = post
+$('msg').onkeydown = e => { if (e.key === 'Enter') post() }
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+</script>
