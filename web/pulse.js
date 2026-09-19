@@ -11,11 +11,17 @@ let live = false
 let retries = 0
 let handlers = {}
 
-async function topicFor(roomId, passphrase) {
+function topicFor(roomId, passphrase) {
   const raw = `${roomId}::${passphrase || ''}`
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
-  const hex = [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('')
-  return `pulse:${hex.slice(0, 24)}`
+  // simple deterministic string hash (FNV-1a) — no browser crypto API needed
+  let h1 = 0x811c9dc5, h2 = 0x811c9dc5
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 0x01000193)
+    h2 = Math.imul(h2 ^ c, 0x85ebca6b)
+  }
+  const hex = (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0')
+  return `pulse:${hex}`
 }
 
 /** Join a room. handlers: { onEvent(e), onMembers(names[]), onStatus(state) } */
@@ -31,7 +37,7 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   }
   me = session.user.id
   myName = displayName || 'guest'
-  topic = await topicFor(roomId, passphrase)
+  topic = topicFor(roomId, passphrase)
   retries = 0
   live = false
   await open()
@@ -93,7 +99,9 @@ function scheduleReconnect() {
 
 function send(e) {
   if (!channel || !live) return Promise.resolve()
-  return channel.send({ type: 'broadcast', event: 'e', payload: { ...e, from: me, name: myName } }).catch(() => {})
+  return channel.send({ type: 'broadcast', event: 'e', payload: { ...e, from: me, name: myName } })
+    .then(res => console.log('[pulse] send result:', res))
+    .catch(err => console.error('[pulse] send FAILED:', err))
 }
 
 export const sendPlay    = at            => send({ t: 'play', at, sentAt: Date.now() })
