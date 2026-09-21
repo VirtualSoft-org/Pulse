@@ -1429,25 +1429,41 @@ document.addEventListener('fullscreenchange', () => {
 // prevent the controls from ever hiding.
 const HIDE_DELAY = 1000
 let lastActivity = Date.now()
-let overControls = false
 let lastMX = null, lastMY = null
+let mouseX = -1, mouseY = -1
 
 function markActivity() {
   lastActivity = Date.now()
   dropzone.classList.remove('pc-hidden')
 }
 
+// Check the cursor position directly instead of relying on
+// mouseenter / mouseleave. Those events become unreliable once the bar
+// gets pointer-events:none (while hidden) or after a pointer-capture
+// gesture, leaving the old `overControls` flag stuck true and preventing
+// auto-hide.
+function isOverControls() {
+  if (mouseX < 0 || mouseY < 0) return false
+  const r = $('playerControls').getBoundingClientRect()
+  return mouseX >= r.left && mouseX <= r.right &&
+         mouseY >= r.top  && mouseY <= r.bottom
+}
+
 function tickHide() {
   if (v.paused) { dropzone.classList.remove('pc-hidden'); return }
-  if (overControls) { lastActivity = Date.now(); return }
+  if (isOverControls()) { lastActivity = Date.now(); return }
   if (Date.now() - lastActivity < HIDE_DELAY) return
   dropzone.classList.add('pc-hidden')
 }
 
 setInterval(tickHide, 300)
 
-dropzone.addEventListener('mousemove', e => {
-  // Ignore sub-3px jitter (trackpad noise) so the timer isn't defeated.
+// Document-level so movement over the controls and topbar also counts.
+// Only real movements (>3px) reset the timer, so trackpad jitter
+// can't defeat the auto-hide.
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX
+  mouseY = e.clientY
   if (lastMX === null ||
       Math.abs(e.clientX - lastMX) > 3 ||
       Math.abs(e.clientY - lastMY) > 3) {
@@ -1456,11 +1472,8 @@ dropzone.addEventListener('mousemove', e => {
     markActivity()
   }
 })
-dropzone.addEventListener('touchstart', markActivity, { passive: true })
-dropzone.addEventListener('pointerdown', markActivity)
-
-$('playerControls').addEventListener('mouseenter', () => { overControls = true; markActivity() })
-$('playerControls').addEventListener('mouseleave', () => { overControls = false; markActivity() })
+document.addEventListener('touchstart', markActivity, { passive: true })
+document.addEventListener('pointerdown', markActivity)
 
 v.addEventListener('play', markActivity)
 v.addEventListener('pause', () => { dropzone.classList.remove('pc-hidden') })
