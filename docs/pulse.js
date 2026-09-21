@@ -72,11 +72,21 @@ function computeHost(members) {
 }
 
 function retrack() {
-  if (!ch || !live) return Promise.resolve()
+  if (!ch || !live) {
+    console.log('[pulse] retrack SKIPPED — ch:', !!ch, 'live:', live)
+    return Promise.resolve()
+  }
+  console.log('[pulse] retrack sending…', { name: myName, tabId })
   return ch.track({
     name: myName, ready: myReady, joinedAt: myJoinedAt,
     hostHint: manualHostId, hostHintAt: manualHostAt,
-  }).catch(e => console.warn('[pulse] retrack failed', e))
+  }).then(r => {
+    console.log('[pulse] track result:', r)
+    return r
+  }).catch(e => {
+    console.error('[pulse] track FAILED:', e)
+    throw e
+  })
 }
 
 function emitMembers() {
@@ -177,9 +187,19 @@ async function open() {
     },
   })
 
-  ch.on('presence', { event: 'sync' }, () => emitMembers())
-  ch.on('presence', { event: 'join' }, () => emitMembers())
-  ch.on('presence', { event: 'leave' }, () => emitMembers())
+  ch.on('presence', { event: 'sync' }, () => {
+    const raw = ch.presenceState() || {}
+    console.log('[pulse] presence SYNC, keys:', Object.keys(raw))
+    emitMembers()
+  })
+  ch.on('presence', { event: 'join' }, ({ key, newPresences }) => {
+    console.log('[pulse] presence JOIN:', key, newPresences)
+    emitMembers()
+  })
+  ch.on('presence', { event: 'leave' }, ({ key }) => {
+    console.log('[pulse] presence LEAVE:', key)
+    emitMembers()
+  })
 
   ch.on('broadcast', { event: 'e' }, ({ payload }) => {
     if (!payload || payload.from === tabId) return
