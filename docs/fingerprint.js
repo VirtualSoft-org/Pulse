@@ -1,15 +1,21 @@
 const W = 9, H = 8                     // 8x8 dHash = 64 bits
-const canvas = document.createElement('canvas')
-canvas.width = W; canvas.height = H
-const ctx = canvas.getContext('2d', { willReadFrequently: true })
+let canvas, ctx
+function getCtx() {
+  if (ctx) return ctx
+  canvas = document.createElement('canvas')
+  canvas.width = W; canvas.height = H
+  ctx = canvas.getContext('2d', { willReadFrequently: true })
+  return ctx
+}
 
 /** Tiny resolution-independent hash of the frame currently shown. */
 export function hashFrame(video) {
   if (!video.videoWidth) return null
   const cw = video.videoWidth, ch = video.videoHeight
   // crop borders: sides 10%, top 8%, bottom 20% (dodges letterboxing + subtitles)
-  ctx.drawImage(video, cw * 0.10, ch * 0.08, cw * 0.80, ch * 0.72, 0, 0, W, H)
-  const d = ctx.getImageData(0, 0, W, H).data
+  const c = getCtx()
+  c.drawImage(video, cw * 0.10, ch * 0.08, cw * 0.80, ch * 0.72, 0, 0, W, H)
+  const d = c.getImageData(0, 0, W, H).data
   const g = new Float32Array(W * H)
   for (let i = 0; i < W * H; i++)
     g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]

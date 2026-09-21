@@ -94,8 +94,8 @@ async function removeStale() {
 function scheduleReconnect() {
   if (!live) return
   live = false
-  handlers.onStatus?.('reconnecting')
   retries++
+  handlers.onStatus?.(retries >= 5 ? 'lost' : 'reconnecting')
   const wait = Math.min(10000, 500 * 2 ** retries)
   setTimeout(async () => {
     if (!topic) return

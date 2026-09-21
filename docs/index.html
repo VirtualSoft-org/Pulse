@@ -172,7 +172,7 @@ function say(text, ms = 4000) {
 function setStatus(state) {
   const pill = $('status')
   pill.className = 'pill ' + state
-  $('statusText').textContent = { connected: 'live', reconnecting: 'reconnecting…' }[state] || state
+  $('statusText').textContent = { connected: 'live', reconnecting: 'reconnecting…', lost: 'lost — reload page' }[state] || state
 }
 
 function loadFile(f) {
