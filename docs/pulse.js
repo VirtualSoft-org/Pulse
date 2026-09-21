@@ -1,7 +1,19 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.53.0/+esm'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: window.sessionStorage,       // per-tab auth, no localStorage collision
+    storageKey: 'pulse.auth',
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+    // Bypass the Web Locks API. It's used to coordinate token refresh across
+    // tabs, but each tab now has its own session, so there's nothing to
+    // coordinate — and the lock was throwing on background tabs anyway.
+    lock: async (_name, _timeout, fn) => fn(),
+  },
+})
 
 let ch = null
 let authId = null          // supabase anonymous user id (used only for auth)
