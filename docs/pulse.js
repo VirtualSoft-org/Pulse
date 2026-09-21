@@ -206,6 +206,7 @@ async function open() {
         clearTimeout(timer)
         if (settled) return
         settled = true
+        live = true                            // set BEFORE retrack; retrack() guards on `live`
         try {
           await retrack()
         } catch (e) {
