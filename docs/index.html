@@ -99,11 +99,113 @@
     #dropzone { aspect-ratio: 16 / 9; max-height: 50vh; }
   }
   #layout { flex: 1; display: flex; min-height: 0; }
-  #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; min-height: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; min-height: 0; position: relative; }
 
-  video {
+  .btn.on { border-color: var(--ok); color: var(--ok); background: rgba(61,220,132,.12); }
+
+  .sub-panel {
+    position: absolute;
+    left: 14px;
+    bottom: 64px;
+    z-index: 300;
+    width: 280px;
+    max-width: calc(100vw - 28px);
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: 0 10px 32px rgba(0,0,0,.45);
+    font-size: 13px;
+  }
+  .sub-panel.hidden { display: none; }
+  .sub-panel-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-weight: 600; font-size: 13px; color: var(--text);
+  }
+  .sub-x {
+    background: transparent; border: 0; color: var(--dim);
+    font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+  }
+  .sub-x:hover { color: var(--text); }
+  .sub-load {
+    background: var(--panel2); border: 1px dashed var(--line);
+    color: var(--text); padding: 9px 10px; border-radius: 8px;
+    cursor: pointer; font-size: 12px; font-family: inherit; text-align: left;
+  }
+  .sub-load:hover { border-color: var(--accent); }
+  .sub-note {
+    font-size: 11px; color: var(--warn);
+    background: rgba(245,197,66,.08);
+    border: 1px solid rgba(245,197,66,.25);
+    border-radius: 8px; padding: 7px 9px; line-height: 1.35;
+  }
+  .sub-note.hidden { display: none; }
+  .sub-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--dim);
+  }
+  .sub-row input[type="range"] {
+    grid-column: 1 / -1;
     width: 100%;
-    height: 100%;
+    -webkit-appearance: none; appearance: none;
+    height: 4px; border-radius: 2px;
+    background: var(--line); outline: none;
+    accent-color: var(--accent);
+  }
+  .sub-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--accent); border: 0; cursor: pointer;
+  }
+  .sub-row input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 0; cursor: pointer;
+  }
+  .sub-row input[type="color"] {
+    width: 34px; height: 24px; padding: 0;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; cursor: pointer;
+  }
+  .sub-row select {
+    background: var(--panel2); border: 1px solid var(--line);
+    color: var(--text); border-radius: 6px; padding: 4px 8px;
+    font-size: 12px; font-family: inherit;
+  }
+  .sub-row.sub-check {
+    display: flex; align-items: center; gap: 8px;
+    grid-template-columns: none;
+  }
+  .sub-val { font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
+  .sub-sep { height: 1px; background: var(--line); margin: 2px 0; }
+  .sub-actions { display: flex; gap: 8px; }
+  .sub-actions .btn { flex: 1; text-align: center; font-size: 12px; padding: 7px 8px; }
+
+  @media (max-width: 720px) {
+    .sub-panel { left: 8px; right: 8px; width: auto; max-width: none; bottom: 56px; }
+  }
+
+  .video-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  video {
+    /* Intrinsic sizing: the element box matches the rendered picture, so
+       ASS.js and native ::cue tracks both align without letterbox math. */
+    width: auto;
+    height: auto;
     max-width: 100%;
     max-height: 100%;
     display: block;
@@ -111,12 +213,17 @@
     background: #000;
     object-fit: contain;
   }
+  .ass-container {
+    position: absolute;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 5;
+  }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 
   /* Custom player control bar */
   #dropzone { display: flex; flex-direction: column; }
-  #dropzone video { flex: 1; min-height: 0; }
   #playerControls {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px;
@@ -326,6 +433,117 @@
   }
   .fs-chat-close:hover { background: rgba(255,255,255,.28); }
 
+  /* Fullscreen reactions (pull-down handle, top-left) */
+  .fs-react {
+    position: absolute;
+    top: 0;
+    left: 16px;
+    z-index: 1001;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .fs-react-handle {
+    width: 64px;
+    height: 26px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 7px;
+    cursor: grab;
+    touch-action: none;
+    border-radius: 0 0 8px 8px;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .fs-react-handle:active { cursor: grabbing; }
+  .fs-react-bar {
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,.75);
+  }
+  .fs-react-row {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    background: rgba(0,0,0,.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 20px;
+    padding: 6px;
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .fs-react.open .fs-react-row {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .fs-react-row button {
+    background: rgba(255,255,255,.12);
+    border: 0;
+    border-radius: 10px;
+    padding: 4px 8px;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    transition: transform .12s ease, background .12s ease;
+  }
+  .fs-react-row button:hover { background: rgba(255,255,255,.25); transform: scale(1.08); }
+
+  @media (max-width: 720px) {
+    .fs-react { left: 8px; }
+    .fs-react-row button { font-size: 16px; padding: 3px 6px; }
+  }
+
+  /* Brightness / volume gesture indicator (fullscreen) */
+  .fs-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,.72);
+    color: #fff;
+    padding: 16px 24px;
+    border-radius: 14px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    z-index: 1002;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    min-width: 130px;
+    text-align: center;
+  }
+  .fs-indicator.show { display: flex; }
+  .fs-indicator-icon { font-size: 26px; line-height: 1; }
+  .fs-indicator-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,.22);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .fs-indicator-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width .06s linear;
+  }
+  .fs-indicator-val {
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: #d0d4dc;
+  }
+
   @media (max-width: 720px) {
     .fs-chat { right: 8px; }
     .fs-chat-input-wrap { width: 200px; }
@@ -420,7 +638,10 @@
   <div id="layout">
     <div id="main">
       <div id="dropzone">
-        <video id="v" playsinline preload="metadata"></video>
+        <div id="videoWrap" class="video-wrap">
+          <video id="v" playsinline preload="metadata"></video>
+          <div id="assContainer" class="ass-container"></div>
+        </div>
         <div id="hint">
           <span>Drop your local video file here</span>
           <button id="pickFile">Choose file…</button>
@@ -437,6 +658,8 @@
       <div class="bar">
         <button class="btn" id="sync">🔄 One-time Sync</button>
         <button class="btn" id="restart">⏮ Restart from 0</button>
+        <button class="btn" id="subToggleBtn" title="Subtitles" aria-pressed="false">CC</button>
+        <button class="btn" id="subStyleBtn" title="Subtitle settings">⚙</button>
         <div id="reactions">
           <button data-e="👍">👍</button>
           <button data-e="😂">😂</button>
@@ -448,6 +671,53 @@
         <span id="toast"></span>
       </div>
       <input id="file" type="file" accept="video/*" style="display:none">
+      <input id="subFile" type="file" accept=".srt,.ass,.ssa,.vtt,text/plain" style="display:none">
+
+      <div id="subPanel" class="sub-panel hidden">
+        <div class="sub-panel-head">
+          <span>Subtitles</span>
+          <button class="sub-x" id="subPanelClose" aria-label="Close" type="button">×</button>
+        </div>
+        <button class="sub-load" id="subLoadBtn" type="button">📂 Load .srt / .ass / .vtt</button>
+        <div id="subNote" class="sub-note hidden"></div>
+        <label class="sub-row sub-check">
+          <input type="checkbox" id="subVisible">
+          <span>Show subtitles</span>
+        </label>
+        <div class="sub-sep"></div>
+        <label class="sub-row">Font size
+          <input type="range" id="subScale" min="50" max="250" step="5" value="100">
+          <span class="sub-val" id="subScaleVal">100%</span>
+        </label>
+        <label class="sub-row">Text color
+          <input type="color" id="subColor" value="#ffffff">
+        </label>
+        <label class="sub-row">Background
+          <input type="range" id="subBg" min="0" max="100" step="5" value="60">
+          <span class="sub-val" id="subBgVal">60%</span>
+        </label>
+        <label class="sub-row">Font
+          <select id="subFont">
+            <option value="system">System</option>
+            <option value="sans">Sans</option>
+            <option value="serif">Serif</option>
+            <option value="mono">Monospace</option>
+          </select>
+        </label>
+        <label class="sub-row">Vertical position
+          <input type="range" id="subPos" min="50" max="95" step="1" value="88">
+          <span class="sub-val" id="subPosVal">88%</span>
+        </label>
+        <label class="sub-row sub-check">
+          <input type="checkbox" id="subShadow" checked>
+          <span>Text shadow</span>
+        </label>
+        <div class="sub-sep"></div>
+        <div class="sub-actions">
+          <button class="btn" id="subReset" type="button">Reset style</button>
+          <button class="btn" id="subRemove" type="button">Remove</button>
+        </div>
+      </div>
     </div>
 
     <div id="side">
@@ -586,14 +856,77 @@ function cleanupFsMessages() {
   document.querySelectorAll('.fs-msg').forEach(el => el.remove())
   document.querySelectorAll('.fs-msg-container').forEach(el => el.remove())
   document.querySelectorAll('.fs-chat').forEach(el => el.remove())
+  document.querySelectorAll('.fs-react').forEach(el => el.remove())
 }
 document.addEventListener('fullscreenchange', cleanupFsMessages)
 document.addEventListener('webkitfullscreenchange', cleanupFsMessages)
+
+// Fullscreen reactions panel (pull-down handle, top-left) --------------------
+function ensureFsReactions(fs) {
+  if (fs.querySelector('.fs-react')) return
+  const root = document.createElement('div')
+  root.className = 'fs-react'
+  root.innerHTML = `
+    <div class="fs-react-handle" role="button" aria-label="Reactions">
+      <div class="fs-react-bar"></div>
+    </div>
+    <div class="fs-react-row">
+      <button data-e="👍">👍</button>
+      <button data-e="😂">😂</button>
+      <button data-e="😮">😮</button>
+      <button data-e="❤️">❤️</button>
+      <button data-e="😭">😭</button>
+      <button data-e="🔥">🔥</button>
+    </div>
+  `
+  fs.appendChild(root)
+
+  const handle = root.querySelector('.fs-react-handle')
+  const row = root.querySelector('.fs-react-row')
+
+  const open = () => root.classList.add('open')
+  const close = () => root.classList.remove('open')
+  const toggle = () => root.classList.contains('open') ? close() : open()
+
+  let sy = 0, dragging = false
+  handle.addEventListener('pointerdown', e => {
+    dragging = true; sy = e.clientY
+    try { handle.setPointerCapture(e.pointerId) } catch {}
+  })
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return
+    const dy = e.clientY - sy
+    if (dy >  20 && !root.classList.contains('open')) { open();  dragging = false }
+    if (dy < -20 &&  root.classList.contains('open')) { close(); dragging = false }
+  })
+  const endDrag = e => {
+    if (!dragging) return
+    dragging = false
+    const dy = e.clientY - sy
+    if (dy >  8) open()
+    else if (dy < -8) close()
+    else toggle()
+  }
+  handle.addEventListener('pointerup', endDrag)
+  handle.addEventListener('pointercancel', () => { dragging = false })
+
+  row.querySelectorAll('button').forEach(btn => {
+    btn.onclick = ev => {
+      ev.stopPropagation()
+      if (!connected) return
+      const emoji = btn.dataset.e
+      sendReaction(emoji)
+      spawnReaction(emoji, 'you')
+      close()
+    }
+  })
+}
 
 // Fullscreen chat input (pull-down handle) -----------------------------------
 function ensureFsChat() {
   const fs = fsElement()
   if (!fs) return null
+  ensureFsReactions(fs)
   let root = fs.querySelector('.fs-chat')
   if (root) return root
 
@@ -674,11 +1007,15 @@ document.addEventListener('webkitfullscreenchange', () => { ensureFsChat() })
 // Global "tap outside to close" — registered once, not per fullscreen session.
 document.addEventListener('pointerdown', e => {
   const openChat = document.querySelector('.fs-chat.open')
-  if (!openChat) return
-  if (openChat.contains(e.target)) return
-  openChat.classList.remove('open')
-  const inp = openChat.querySelector('.fs-chat-input')
-  if (inp) inp.blur()
+  if (openChat && !openChat.contains(e.target)) {
+    openChat.classList.remove('open')
+    const inp = openChat.querySelector('.fs-chat-input')
+    if (inp) inp.blur()
+  }
+  const openReact = document.querySelector('.fs-react.open')
+  if (openReact && !openReact.contains(e.target)) {
+    openReact.classList.remove('open')
+  }
 }, true)
 
 // Auto fullscreen on landscape rotation (mobile only) -------------------------
@@ -829,6 +1166,8 @@ function loadFile(f) {
     v.onloadedmetadata = null
     if (connected) { snapped = false; sendPosReq() }
     handleOrientationChange()
+    reattachSubs()
+    syncAssRect()
   }
   $('hint').style.display = 'none'
 }
@@ -1084,46 +1423,54 @@ document.addEventListener('fullscreenchange', () => {
   const b = $('pcFs'); if (b) b.textContent = document.fullscreenElement ? '⤡' : '⛶'
 })
 
-// Auto-hide the control bar after 2.5s of no interaction while playing.
-const HIDE_DELAY = 2500
-let hideTimer = null
+// Auto-hide the control bar during playback.
+// Uses an interval-based check + timestamp instead of a single setTimeout,
+// so continuous mousemove jitter on trackpads can't keep resetting it and
+// prevent the controls from ever hiding.
+const HIDE_DELAY = 1000
+let lastActivity = Date.now()
 let overControls = false
+let lastMX = null, lastMY = null
 
-function showControls() {
+function markActivity() {
+  lastActivity = Date.now()
   dropzone.classList.remove('pc-hidden')
-  clearTimeout(hideTimer)
-  if (!v.paused) {
-    hideTimer = setTimeout(() => {
-      if (!overControls && !v.paused) dropzone.classList.add('pc-hidden')
-    }, HIDE_DELAY)
+}
+
+function tickHide() {
+  if (v.paused) { dropzone.classList.remove('pc-hidden'); return }
+  if (overControls) { lastActivity = Date.now(); return }
+  if (Date.now() - lastActivity < HIDE_DELAY) return
+  dropzone.classList.add('pc-hidden')
+}
+
+setInterval(tickHide, 300)
+
+dropzone.addEventListener('mousemove', e => {
+  // Ignore sub-3px jitter (trackpad noise) so the timer isn't defeated.
+  if (lastMX === null ||
+      Math.abs(e.clientX - lastMX) > 3 ||
+      Math.abs(e.clientY - lastMY) > 3) {
+    lastMX = e.clientX
+    lastMY = e.clientY
+    markActivity()
   }
-}
+})
+dropzone.addEventListener('touchstart', markActivity, { passive: true })
+dropzone.addEventListener('pointerdown', markActivity)
 
-function hideControlsNow() {
-  clearTimeout(hideTimer)
-  if (!v.paused && !overControls) dropzone.classList.add('pc-hidden')
-}
+$('playerControls').addEventListener('mouseenter', () => { overControls = true; markActivity() })
+$('playerControls').addEventListener('mouseleave', () => { overControls = false; markActivity() })
 
-dropzone.addEventListener('mousemove', showControls)
-dropzone.addEventListener('touchstart', showControls, { passive: true })
-dropzone.addEventListener('pointerdown', showControls)
+v.addEventListener('play', markActivity)
+v.addEventListener('pause', () => { dropzone.classList.remove('pc-hidden') })
+v.addEventListener('ended', () => { dropzone.classList.remove('pc-hidden') })
 
-$('playerControls').addEventListener('mouseenter', () => { overControls = true; showControls() })
-$('playerControls').addEventListener('mouseleave', () => { overControls = false; showControls() })
-
-v.addEventListener('play', () => { showControls() })
-v.addEventListener('pause', () => { dropzone.classList.remove('pc-hidden'); clearTimeout(hideTimer) })
-v.addEventListener('ended', () => { dropzone.classList.remove('pc-hidden'); clearTimeout(hideTimer) })
-
-// Press any key during playback → reveal controls briefly.
-window.addEventListener('keydown', showControls)
-
-// Hide on initial state (before a file is loaded, keep controls visible).
-// Only hides once the user is actually playing.
+window.addEventListener('keydown', markActivity)
 
 // Keyboard: space = play/pause, F = fullscreen (host only)
 window.addEventListener('keydown', e => {
-  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return
+  if (e.target && ['INPUT','TEXTAREA','SELECT','BUTTON'].includes(e.target.tagName)) return
   if (e.key === ' ' && !e.repeat) {
     e.preventDefault()
     $('pcPlay').click()
@@ -1132,6 +1479,108 @@ window.addEventListener('keydown', e => {
     $('pcFs').click()
   }
 })
+
+// MX-Player style fullscreen gestures ----------------------------------------
+// Left half: swipe up = brighter, down = dimmer (CSS filter on the video).
+// Right half: swipe up = louder, down = quieter.
+// Only active in fullscreen; ignored when the drag starts on any UI control.
+const clamp01 = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
+
+let currentBrightness = 1
+function applyBrightness(val) {
+  currentBrightness = val
+  v.style.filter = val >= 0.99 ? '' : `brightness(${val.toFixed(3)})`
+}
+
+const fsIndicator = document.createElement('div')
+fsIndicator.className = 'fs-indicator'
+fsIndicator.innerHTML = `
+  <div class="fs-indicator-icon"></div>
+  <div class="fs-indicator-bar"><i></i></div>
+  <div class="fs-indicator-val"></div>
+`
+dropzone.appendChild(fsIndicator)
+
+let indicatorTimer = null
+function showIndicator(icon, value01, label) {
+  fsIndicator.querySelector('.fs-indicator-icon').textContent = icon
+  fsIndicator.querySelector('.fs-indicator-bar > i').style.width =
+    Math.round(value01 * 100) + '%'
+  fsIndicator.querySelector('.fs-indicator-val').textContent = label
+  fsIndicator.classList.add('show')
+  clearTimeout(indicatorTimer)
+}
+function hideIndicatorSoon() {
+  clearTimeout(indicatorTimer)
+  indicatorTimer = setTimeout(() => fsIndicator.classList.remove('show'), 700)
+}
+
+let gesture = null
+
+function gestureAllowed(target) {
+  if (!document.fullscreenElement) return false
+  if (!target || typeof target.closest !== 'function') return true
+  return !target.closest(
+    '#playerControls, .fs-chat, .fs-react, .fs-msg, .fs-indicator'
+  )
+}
+
+dropzone.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  if (!gestureAllowed(e.target)) return
+  const rect = dropzone.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+  const isLeft = (e.clientX - rect.left) < rect.width / 2
+  gesture = {
+    kind: isLeft ? 'bright' : 'vol',
+    startY: e.clientY,
+    startBright: currentBrightness,
+    startVol: v.muted ? 0 : v.volume,
+    rectH: rect.height,
+    pointerId: e.pointerId,
+    moved: false,
+  }
+  try { dropzone.setPointerCapture(e.pointerId) } catch {}
+})
+
+dropzone.addEventListener('pointermove', e => {
+  if (!gesture || e.pointerId !== gesture.pointerId) return
+  const dy = gesture.startY - e.clientY      // positive = swipe up
+  if (!gesture.moved && Math.abs(dy) < 8) return
+  gesture.moved = true
+
+  // Full-height swipe moves the full range.
+  const delta = dy / (gesture.rectH * 0.7)
+
+  if (gesture.kind === 'bright') {
+    const next = clamp01(gesture.startBright + delta, 0.1, 1.0)
+    applyBrightness(next)
+    const pct = (next - 0.1) / 0.9
+    showIndicator('☀️', pct, Math.round(pct * 100) + '%')
+  } else {
+    const next = clamp01(gesture.startVol + delta, 0, 1)
+    v.volume = next
+    v.muted = next === 0
+    updatePcMute()
+    const vol = $('pcVol'); if (vol) vol.value = String(next)
+    showIndicator(next === 0 ? '🔇' : '🔊', next, Math.round(next * 100) + '%')
+  }
+})
+
+function endGesture(e) {
+  if (!gesture) return
+  if (e.pointerId !== undefined && e.pointerId !== gesture.pointerId) return
+  const moved = gesture.moved
+  gesture = null
+  if (moved) hideIndicatorSoon()
+}
+dropzone.addEventListener('pointerup', endGesture)
+dropzone.addEventListener('pointercancel', endGesture)
+
+// Stop the browser from turning a vertical swipe into a page scroll / pull-to-refresh.
+dropzone.addEventListener('touchmove', e => {
+  if (gesture && gesture.moved) e.preventDefault()
+}, { passive: false })
 
 updatePcPlay(); updatePcMute(); updatePcTime()
 
@@ -1146,6 +1595,301 @@ $('restart').onclick = () => {
   if (hostId && hostId !== myId()) return say('Only the host can restart')
   v.currentTime = 0; if (fileKey) localStorage.removeItem(fileKey)
 }
+
+// ── Subtitles ────────────────────────────────────────────────────────────────
+const SUB_KEY = 'pulse.substyle'
+const DEFAULT_SUB_STYLE = { scale: 100, color: '#ffffff', bg: 60, font: 'system', pos: 88, shadow: true }
+let subSettings = Object.assign({}, DEFAULT_SUB_STYLE, JSON.parse(localStorage.getItem(SUB_KEY) || '{}'))
+
+let subCues = null        // [{start, end, text}] for SRT / VTT
+let subTrack = null       // native <track> element
+let subObjectUrl = null   // blob URL backing the track
+let subAss = null         // ASS.js instance
+let subAssText = null     // raw ASS source, kept so we can rebuild on video change
+let subsLoaded = false
+let subsVisible = false
+
+const FONT_MAP = {
+  system: '-apple-system, "Segoe UI", Roboto, sans-serif',
+  sans: 'Arial, Helvetica, sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'ui-monospace, Menlo, Consolas, monospace',
+}
+
+const cueStyleEl = document.createElement('style')
+cueStyleEl.id = 'cueStyle'
+document.head.appendChild(cueStyleEl)
+
+const pad = (n, w = 2) => String(n).padStart(w, '0')
+function fmtVttTime(total) {
+  const ms = Math.round(total * 1000)
+  return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`
+}
+function toSeconds(h, m, s, mmm) {
+  return (+h) * 3600 + (+m) * 60 + (+s) + (+mmm.padEnd(3, '0')) / 1000
+}
+
+// Escape everything, then re-allow the inline tags WebVTT actually supports.
+function sanitizeSubText(s) {
+  let t = String(s)
+    .replace(/\{\\[^}]*\}/g, '')            // ASS override codes that leak into SRT
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  t = t.replace(/&lt;(\/?)(b|i|u)&gt;/gi, '<$1$2>')
+  t = t.replace(/&lt;br\s*\/?&gt;/gi, '\n')
+  return t
+}
+
+const TIME_RE = /(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})/
+
+function parseSrt(text) {
+  const out = []
+  const clean = String(text).replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '')
+  for (const block of clean.split(/\n{2,}/)) {
+    const lines = block.split('\n')
+    let i = 0
+    while (i < lines.length && !lines[i].trim()) i++
+    if (i >= lines.length) continue
+    if (/^\d+$/.test(lines[i].trim())) i++
+    if (i >= lines.length) continue
+    const m = lines[i].match(TIME_RE)
+    if (!m) continue
+    const body = lines.slice(i + 1).join('\n').trim()
+    if (body) out.push({ start: toSeconds(m[1], m[2], m[3], m[4]), end: toSeconds(m[5], m[6], m[7], m[8]), text: sanitizeSubText(body) })
+  }
+  return out
+}
+
+function parseVtt(text) {
+  const out = []
+  const clean = String(text).replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '')
+  for (const block of clean.split(/\n{2,}/)) {
+    const lines = block.split('\n').filter(l => l.trim())
+    if (!lines.length) continue
+    if (/^WEBVTT/.test(lines[0])) { lines.shift(); if (!lines.length) continue }
+    if (/^(STYLE|NOTE|REGION)\b/.test(lines[0])) continue
+    let i = 0
+    if (!lines[i].includes('-->')) i++
+    if (i >= lines.length) continue
+    const m = lines[i].match(TIME_RE)
+    if (!m) continue
+    const body = lines.slice(i + 1).join('\n').trim()
+    if (body) out.push({ start: toSeconds(m[1], m[2], m[3], m[4]), end: toSeconds(m[5], m[6], m[7], m[8]), text: body })
+  }
+  return out
+}
+
+function buildVtt(cues, posPercent) {
+  const body = cues.map(c =>
+    `${fmtVttTime(c.start)} --> ${fmtVttTime(c.end)} line:${posPercent}% position:50% align:center\n${c.text}\n`
+  ).join('\n')
+  return 'WEBVTT\n\n' + body
+}
+
+function applyCueStyle() {
+  const s = subSettings
+  cueStyleEl.textContent = `
+    video::cue {
+      font-size: ${s.scale}%;
+      color: ${s.color};
+      background-color: rgba(0,0,0,${(s.bg / 100).toFixed(2)});
+      font-family: ${FONT_MAP[s.font] || FONT_MAP.system};
+      ${s.shadow ? 'text-shadow: 0 0 4px #000, 0 0 2px #000, 0 1px 3px #000;' : ''}
+      line-height: 1.35;
+    }
+  `
+}
+
+function saveSubSettings() {
+  try { localStorage.setItem(SUB_KEY, JSON.stringify(subSettings)) } catch {}
+}
+
+function ensureTrack() {
+  if (!subTrack) {
+    subTrack = document.createElement('track')
+    subTrack.kind = 'subtitles'
+    subTrack.srclang = 'en'
+    subTrack.label = 'Subtitles'
+    subTrack.default = true
+  }
+  if (subTrack.parentNode !== v) v.appendChild(subTrack)
+  return subTrack
+}
+
+function rebuildVttTrack() {
+  if (!subCues) return
+  if (subObjectUrl) URL.revokeObjectURL(subObjectUrl)
+  subObjectUrl = URL.createObjectURL(new Blob([buildVtt(subCues, subSettings.pos)], { type: 'text/vtt' }))
+  ensureTrack().src = subObjectUrl
+}
+
+function setSubsVisible(on) {
+  subsVisible = !!on && subsLoaded
+  const box = $('subVisible'); if (box) box.checked = subsVisible
+  const btn = $('subToggleBtn')
+  if (btn) { btn.classList.toggle('on', subsVisible); btn.setAttribute('aria-pressed', subsVisible ? 'true' : 'false') }
+  if (subTrack) subTrack.mode = subsVisible ? 'showing' : 'hidden'
+  const container = $('assContainer')
+  if (container) container.style.display = subsVisible ? '' : 'none'
+  if (subAss) { try { subsVisible ? subAss.show() : subAss.hide() } catch {} }
+}
+
+function removeSubs() {
+  if (subObjectUrl) { URL.revokeObjectURL(subObjectUrl); subObjectUrl = null }
+  if (subTrack) { try { subTrack.remove() } catch {} subTrack = null }
+  if (subAss) { try { subAss.destroy() } catch {} subAss = null }
+  subAssText = null; subCues = null; subsLoaded = false
+  const c = $('assContainer'); if (c) c.innerHTML = ''
+  setSubsVisible(false)
+  updateSubNote()
+  say('Subtitles removed')
+}
+
+function looksLikeAss(text) {
+  return /^\s*\[Script Info\]/im.test(text) || /^\s*\[V4\+? Styles\]/im.test(text)
+}
+
+function updateSubNote() {
+  const note = $('subNote')
+  if (!note) return
+  if (subAssText) {
+    note.textContent = 'ASS / SSA file loaded — its own styling is used. The style controls below apply to .srt / .vtt only.'
+    note.classList.remove('hidden')
+  } else {
+    note.classList.add('hidden')
+  }
+}
+
+// ASS.js is fetched on demand so users who never load an .ass file don't pay for it.
+let assLibPromise = null
+function loadAssLib() {
+  if (window.ASS) return Promise.resolve(window.ASS)
+  if (assLibPromise) return assLibPromise
+  assLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'https://cdn.jsdelivr.net/npm/assjs@0.1.6/dist/ass.global.min.js'
+    s.onload = () => window.ASS ? resolve(window.ASS) : reject(new Error('ASS global missing'))
+    s.onerror = () => reject(new Error('ASS lib failed to load'))
+    document.head.appendChild(s)
+  })
+  return assLibPromise
+}
+
+function syncAssRect() {
+  const box = $('assContainer')
+  if (!box || !subAss) return
+  if (!v.offsetWidth || !v.offsetHeight) return
+  box.style.left = v.offsetLeft + 'px'
+  box.style.top = v.offsetTop + 'px'
+  box.style.width = v.offsetWidth + 'px'
+  box.style.height = v.offsetHeight + 'px'
+  box.style.transform = 'none'
+}
+
+async function loadAss(text) {
+  try { await loadAssLib() } catch { say('ASS renderer failed to load'); return }
+  if (subAss) { try { subAss.destroy() } catch {} subAss = null }
+  if (subObjectUrl) { URL.revokeObjectURL(subObjectUrl); subObjectUrl = null }
+  if (subTrack) { try { subTrack.remove() } catch {} subTrack = null }
+  subCues = null
+  const container = $('assContainer')
+  container.innerHTML = ''
+  subAssText = text
+  subAss = new window.ASS(text, v, { container, resampling: 'video_width' })
+  subsLoaded = true
+  syncAssRect()
+  setSubsVisible(true)
+  updateSubNote()
+  say('ASS subtitles loaded')
+}
+
+async function handleSubFile(file) {
+  if (!file) return
+  const name = (file.name || '').toLowerCase()
+  let text = ''
+  try { text = await file.text() } catch { say('Could not read subtitle file'); return }
+  if (name.endsWith('.ass') || name.endsWith('.ssa') || looksLikeAss(text)) { await loadAss(text); return }
+
+  const isVtt = name.endsWith('.vtt') || /^\uFEFF?WEBVTT/.test(text)
+  const cues = isVtt ? parseVtt(text) : parseSrt(text)
+  if (!cues.length) { say('No subtitle cues found in that file'); return }
+
+  if (subAss) { try { subAss.destroy() } catch {} subAss = null }
+  $('assContainer').innerHTML = ''
+  subAssText = null
+  subCues = cues
+  rebuildVttTrack()
+  subsLoaded = true
+  setSubsVisible(true)
+  updateSubNote()
+  say(`${cues.length} subtitle cues loaded`)
+}
+
+function reattachSubs() {
+  if (subCues) {
+    rebuildVttTrack()
+    if (subTrack) subTrack.mode = subsVisible ? 'showing' : 'hidden'
+  }
+  if (subAssText && window.ASS) {
+    if (subAss) { try { subAss.destroy() } catch {} }
+    subAss = new window.ASS(subAssText, v, { container: $('assContainer'), resampling: 'video_width' })
+    if (!subsVisible) { try { subAss.hide() } catch {} }
+    syncAssRect()
+  }
+}
+
+function syncSubPanelUI() {
+  const s = subSettings
+  $('subScale').value = s.scale; $('subScaleVal').textContent = s.scale + '%'
+  $('subColor').value = s.color
+  $('subBg').value = s.bg;       $('subBgVal').textContent = s.bg + '%'
+  $('subFont').value = s.font
+  $('subPos').value = s.pos;     $('subPosVal').textContent = s.pos + '%'
+  $('subShadow').checked = s.shadow
+  $('subVisible').checked = subsVisible
+}
+
+$('subToggleBtn').onclick = () => {
+  if (!subsLoaded) { $('subFile').click(); return }
+  setSubsVisible(!subsVisible)
+}
+$('subStyleBtn').onclick = e => {
+  e.stopPropagation()
+  $('subPanel').classList.toggle('hidden')
+}
+$('subPanelClose').onclick = () => $('subPanel').classList.add('hidden')
+$('subLoadBtn').onclick = () => $('subFile').click()
+$('subFile').onchange = e => { handleSubFile(e.target.files[0]); e.target.value = '' }
+$('subRemove').onclick = removeSubs
+$('subVisible').onchange = e => setSubsVisible(e.target.checked)
+$('subScale').oninput = e => { subSettings.scale = +e.target.value; $('subScaleVal').textContent = subSettings.scale + '%'; applyCueStyle(); saveSubSettings() }
+$('subColor').oninput = e => { subSettings.color = e.target.value; applyCueStyle(); saveSubSettings() }
+$('subBg').oninput = e => { subSettings.bg = +e.target.value; $('subBgVal').textContent = subSettings.bg + '%'; applyCueStyle(); saveSubSettings() }
+$('subFont').onchange = e => { subSettings.font = e.target.value; applyCueStyle(); saveSubSettings() }
+$('subPos').oninput = e => { subSettings.pos = +e.target.value; $('subPosVal').textContent = subSettings.pos + '%'; saveSubSettings() }
+$('subPos').onchange = () => { if (subCues) rebuildVttTrack() }
+$('subShadow').onchange = e => { subSettings.shadow = e.target.checked; applyCueStyle(); saveSubSettings() }
+$('subReset').onclick = () => {
+  subSettings = Object.assign({}, DEFAULT_SUB_STYLE)
+  syncSubPanelUI(); applyCueStyle(); saveSubSettings()
+  if (subCues) rebuildVttTrack()
+}
+
+document.addEventListener('click', e => {
+  const panel = $('subPanel')
+  if (!panel || panel.classList.contains('hidden')) return
+  if (panel.contains(e.target)) return
+  if (e.target.closest && e.target.closest('#subStyleBtn')) return
+  panel.classList.add('hidden')
+})
+
+window.addEventListener('resize', syncAssRect)
+document.addEventListener('fullscreenchange', () => setTimeout(syncAssRect, 60))
+if (window.ResizeObserver) new ResizeObserver(syncAssRect).observe($('videoWrap'))
+
+applyCueStyle()
+syncSubPanelUI()
 
 function post() {
   const box = $('msg'), text = box.value.trim()
