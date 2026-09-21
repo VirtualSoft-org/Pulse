@@ -3,16 +3,30 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-let presenceCh = null
-let bcastCh = null
-let me = null
+let ch = null
+let authId = null          // supabase anonymous user id (used only for auth)
+let tabId = null           // per-tab identity (sessionStorage) — our real "me"
 let myName = 'guest'
 let myReady = false
+let myJoinedAt = 0
 let topic = null
 let live = false
 let retries = 0
 let handlers = {}
-let myJoinedAt = 0
+
+const memberMap = new Map()   // tabId -> { name, ready, joinedAt, lastSeen }
+let pollTimer = null
+
+function initTabId() {
+  let id = sessionStorage.getItem('pulse.tabId')
+  if (!id) {
+    id = (crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : (Date.now().toString(36) + Math.random().toString(36).slice(2))
+    sessionStorage.setItem('pulse.tabId', id)
+  }
+  return id
+}
 
 function topicFor(roomId, passphrase) {
   const raw = `${roomId}::${passphrase || ''}`
@@ -35,22 +49,49 @@ function computeHost(members) {
 }
 
 function emitMembers() {
-  if (!presenceCh) return
-  const state = presenceCh.presenceState() || {}
-  const members = []
-  for (const [key, payloads] of Object.entries(state)) {
-    for (const p of payloads) {
-      members.push({
-        name: p.name || '?',
-        ready: !!p.ready,
-        user_id: p.user_id || key,
-        joinedAt: p.joinedAt || 0,
-      })
+  if (tabId) {
+    memberMap.set(tabId, {
+      name: myName, ready: myReady, joinedAt: myJoinedAt, lastSeen: Date.now(),
+    })
+  }
+
+  if (ch) {
+    const state = ch.presenceState() || {}
+    for (const key of Object.keys(state)) {
+      if (!key || key === tabId) continue
+      for (const p of (state[key] || [])) {
+        memberMap.set(key, {
+          name: (p && p.name) || '?',
+          ready: !!(p && p.ready),
+          joinedAt: (p && p.joinedAt) || 0,
+          lastSeen: Date.now(),
+        })
+      }
     }
   }
-  console.log('[pulse] presence members:', members)
+
+  // prune entries we haven't seen in 30s (covers a tab that crashed without untracking)
+  const now = Date.now()
+  for (const [uid, m] of memberMap) {
+    if (uid === tabId) continue
+    if (now - m.lastSeen > 30000) memberMap.delete(uid)
+  }
+
+  const members = [...memberMap.entries()].map(([uid, m]) => ({
+    user_id: uid, name: m.name, ready: m.ready, joinedAt: m.joinedAt,
+  }))
+
   handlers.onMembers?.(members)
   handlers.onHost?.(computeHost(members))
+}
+
+function startPoll() {
+  stopPoll()
+  pollTimer = setInterval(emitMembers, 3000)
+}
+function stopPoll() {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = null
 }
 
 export async function connect(roomId, displayName, passphrase, h = {}) {
@@ -63,41 +104,34 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
     if (error) throw error
     session = data.session
   }
-  me = session.user.id
+  authId = session.user.id
+  tabId = initTabId()
   myName = displayName || 'guest'
   myReady = false
   myJoinedAt = Date.now()
   topic = topicFor(roomId, passphrase)
   retries = 0
   live = false
+  memberMap.clear()
   await open()
-  return me
+  return tabId
 }
 
 function open() {
-  const ch = sb.channel(`pulse:${topic}`, {
+  ch = sb.channel(`pulse:${topic}`, {
     config: {
-      presence: { key: me },
-      broadcast: { self: false }
-    }
+      presence: { key: tabId },
+      broadcast: { self: false },
+    },
   })
-  presenceCh = ch
-  bcastCh = ch
 
-  ch.on('presence', { event: 'sync' }, () => {
-    console.log('[pulse] presence sync')
-    emitMembers()
-  })
-  ch.on('presence', { event: 'join' }, ({ key, newPresences }) => {
-    console.log('[pulse] presence join:', key, newPresences)
-  })
-  ch.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-    console.log('[pulse] presence leave:', key, leftPresences)
-  })
+  ch.on('presence', { event: 'sync' }, () => emitMembers())
+  ch.on('presence', { event: 'join' }, () => emitMembers())
+  ch.on('presence', { event: 'leave' }, () => emitMembers())
 
   ch.on('broadcast', { event: 'e' }, ({ payload }) => {
-    if (!payload || payload.from === me) return
-    if (payload.to && payload.to !== me) return
+    if (!payload || payload.from === tabId) return
+    if (payload.to && payload.to !== tabId) return
     handlers.onEvent?.(payload)
   })
 
@@ -113,10 +147,9 @@ function open() {
         if (settled) return
         settled = true
         try {
-          await ch.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt })
-          console.log('[pulse] tracked presence as', me)
+          await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt })
         } catch (e) {
-          console.error('[pulse] track failed', e)
+          console.warn('[pulse] track failed', e)
         }
         resolve()
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -129,14 +162,8 @@ function open() {
     live = true
     retries = 0
     handlers.onStatus?.('connected')
-    startPresencePoll()
+    startPoll()
   })
-}
-
-async function removeStale() {
-  if (presenceCh) { try { await sb.removeChannel(presenceCh) } catch {} }
-  presenceCh = null
-  bcastCh = null
 }
 
 function scheduleReconnect() {
@@ -152,52 +179,46 @@ function scheduleReconnect() {
   }, wait)
 }
 
-function send(e) {
-  if (!bcastCh || !live) return Promise.resolve()
-  return bcastCh.send({ type: 'broadcast', event: 'e', payload: { ...e, from: me, name: myName } })
+async function removeStale() {
+  if (ch) { try { await sb.removeChannel(ch) } catch {} }
+  ch = null
 }
 
-export const sendPlay    = at            => send({ t: 'play', at, sentAt: Date.now() })
-export const sendPause   = at            => send({ t: 'pause', at })
-export const sendChat    = text          => send({ t: 'chat', text })
-export const sendSyncReq = (hash, at)    => send({ t: 'sync_req', hash, at })
-export const sendSyncRes = (to, ok, off) => send({ t: 'sync_res', to, ok, offset: off })
-export const sendReaction = emoji        => send({ t: 'reaction', emoji })
-export const sendPosReq  = ()            => send({ t: 'pos_req' })
-export const sendPosRes  = (to, at, playing) => send({ t: 'pos_res', to, at, playing, sentAt: Date.now() })
+function send(e) {
+  if (!ch || !live) return Promise.resolve()
+  return ch.send({ type: 'broadcast', event: 'e', payload: { ...e, from: tabId, name: myName } })
+}
+
+export const sendPlay     = at            => send({ t: 'play', at, sentAt: Date.now() })
+export const sendPause    = at            => send({ t: 'pause', at })
+export const sendChat     = text          => send({ t: 'chat', text })
+export const sendSyncReq  = (hash, at)    => send({ t: 'sync_req', hash, at })
+export const sendSyncRes  = (to, ok, off) => send({ t: 'sync_res', to, ok, offset: off })
+export const sendReaction = emoji         => send({ t: 'reaction', emoji })
+export const sendPosReq   = ()            => send({ t: 'pos_req' })
+export const sendPosRes   = (to, at, playing) => send({ t: 'pos_res', to, at, playing, sentAt: Date.now() })
 
 export async function setReady(ready) {
   myReady = ready
-  if (presenceCh && live) { try { await presenceCh.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt }) } catch {} }
+  if (ch && live) {
+    try { await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt }) } catch {}
+    emitMembers()
+  }
 }
 
-export function myId() { return me }
+export function myId() { return tabId }
 
 export async function disconnect() {
+  stopPoll()
+  if (ch) { try { await ch.untrack() } catch {} }
+  await removeStale()
+  memberMap.clear()
   topic = null
   live = false
-  stopPresencePoll()
-  if (presenceCh) { try { await presenceCh.untrack() } catch {} }
-  await removeStale()
-}
-
-let pollTimer = null
-function startPresencePoll() {
-  stopPresencePoll()
-  let last = ''
-  pollTimer = setInterval(() => {
-    if (!presenceCh) return
-    const state = presenceCh.presenceState() || {}
-    const key = JSON.stringify(state)
-    if (key !== last) { last = key; emitMembers() }
-  }, 1200)
-}
-function stopPresencePoll() {
-  if (pollTimer) clearInterval(pollTimer)
-  pollTimer = null
 }
 
 window.pulseDebug = {
-  state: () => ({ presence: presenceCh?.state, broadcast: bcastCh?.state, live, topic }),
-  members: () => presenceCh?.presenceState(),
+  state: () => ({ presence: ch && ch.state, live, topic, tabId, authId }),
+  members: () => Object.fromEntries(memberMap),
+  presenceRaw: () => ch && ch.presenceState(),
 }
