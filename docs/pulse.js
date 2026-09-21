@@ -98,10 +98,11 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   handlers = h
   await disconnect()
 
+  handlers.onProgress?.('Signing in…')
   let { data: { session } } = await sb.auth.getSession()
   if (!session) {
     const { data, error } = await sb.auth.signInAnonymously()
-    if (error) throw error
+    if (error) throw new Error('auth: ' + error.message)
     session = data.session
   }
   authId = session.user.id
@@ -113,11 +114,26 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   retries = 0
   live = false
   memberMap.clear()
-  await open()
-  return tabId
+
+  const maxAttempts = 4
+  let lastErr = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    handlers.onProgress?.(attempt === 1 ? 'Connecting to room…' : `Retrying… (${attempt}/${maxAttempts})`)
+    try {
+      await open()
+      return tabId
+    } catch (err) {
+      lastErr = err
+      console.warn('[pulse] connect attempt ' + attempt + ' failed:', err)
+      await removeStale()
+      if (attempt < maxAttempts) await new Promise(r => setTimeout(r, 400 * attempt))
+    }
+  }
+  throw lastErr || new Error('connect failed')
 }
 
-function open() {
+async function open() {
+  await removeStale()   // ensure no lingering channel from a prior attempt
   ch = sb.channel(`pulse:${topic}`, {
     config: {
       presence: { key: tabId, enabled: true },
@@ -139,7 +155,7 @@ function open() {
     let settled = false
     const timer = setTimeout(() => {
       if (!settled) { settled = true; reject(new Error('subscribe timeout')) }
-    }, 8000)
+    }, 12000)
 
     ch.subscribe(async (status, err) => {
       if (status === 'SUBSCRIBED') {

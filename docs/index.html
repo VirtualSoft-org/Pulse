@@ -22,6 +22,15 @@
   #splash button { background: var(--accent); border: none; color: #0b0d12; font-weight: 600; padding: 10px; border-radius: 8px; cursor: pointer; }
   #splash button:hover { background: var(--accent2); color: #fff; }
   #splashErr { color: var(--bad); font-size: 13px; min-height: 16px; }
+  #splashProg { color: var(--dim); font-size: 12px; min-height: 16px; text-align: center; }
+  #splash button:disabled { opacity: .75; cursor: wait; }
+  #splash button .spin {
+    display: inline-block; width: 12px; height: 12px; margin-right: 6px;
+    border: 2px solid rgba(11,13,18,.35); border-top-color: #0b0d12;
+    border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   #app { display: none; height: 100vh; flex-direction: column; }
   #app.show { display: flex; }
@@ -62,6 +71,139 @@
   #reactions button:hover { border-color: var(--accent); transform: scale(1.1); }
 
   .reaction-pop { position: absolute; font-size: 28px; pointer-events: none; animation: floatUp 1.6s ease-out forwards; }
+
+  /* Fullscreen chat popups */
+  .fs-msg-container {
+    position: absolute;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    z-index: 1000;
+    pointer-events: none;
+    max-width: min(80%, 520px);
+  }
+  .fs-msg {
+    pointer-events: auto;
+    background: rgba(0,0,0,.78);
+    color: #fff;
+    padding: 9px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    line-height: 1.35;
+    max-width: 100%;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity .22s ease, transform .22s ease;
+    cursor: grab;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .fs-msg b { color: var(--accent); margin-right: 6px; font-weight: 600; }
+  .fs-msg.show { opacity: 1; transform: translateY(0); }
+  .fs-msg.hide { opacity: 0; transform: translateY(-8px); }
+  .fs-msg:active { cursor: grabbing; }
+
+  /* Fullscreen chat input (pull-down handle, top-right) */
+  .fs-chat {
+    position: absolute;
+    top: 0;
+    right: 16px;
+    z-index: 1001;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .fs-chat-handle {
+    width: 64px;
+    height: 26px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 7px;
+    cursor: grab;
+    touch-action: none;
+    border-radius: 0 0 8px 8px;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .fs-chat-handle:active { cursor: grabbing; }
+  .fs-chat-bar {
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,.75);
+  }
+  .fs-chat-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    background: rgba(0,0,0,.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 20px;
+    padding: 6px 6px 6px 14px;
+    width: 240px;
+    max-width: calc(100vw - 32px);
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .fs-chat.open .fs-chat-input-wrap {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  .fs-chat-input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: #fff;
+    font-size: 14px;
+    padding: 6px 0;
+    min-width: 0;
+    font-family: inherit;
+  }
+  .fs-chat-input::placeholder { color: rgba(255,255,255,.55); }
+  .fs-chat-close {
+    background: rgba(255,255,255,.15);
+    border: 0;
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .fs-chat-close:hover { background: rgba(255,255,255,.28); }
+
+  @media (max-width: 720px) {
+    .fs-chat { right: 8px; }
+    .fs-chat-input-wrap { width: 200px; }
+  }
+
+  @media (max-width: 720px) {
+    .fs-msg-container { bottom: 80px; max-width: 90%; }
+    .fs-msg { font-size: 13px; padding: 8px 12px; }
+  }
   @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(0.8); } 20% { transform: translateY(-10px) scale(1.1); } 100% { opacity: 0; transform: translateY(-90px) scale(1); } }
 
   #side { width: 280px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
@@ -128,7 +270,8 @@
     <input id="room" placeholder="room name" required>
     <input id="nick" placeholder="your name" required>
     <input id="pass" placeholder="passphrase (share with friends)">
-    <button type="submit">Join room</button>
+    <button type="submit" id="joinBtn"><span>Join room</span></button>
+    <div id="splashProg"></div>
     <div id="splashErr"></div>
   </form>
 </div>
@@ -219,6 +362,219 @@ function bubble(name, text, mine) {
   chat.insertAdjacentHTML('beforeend',
     `<div class="msg ${mine ? 'me' : ''}"><div class="who">${mine ? 'you' : name}</div>${text}</div>`)
   chat.scrollTop = 1e9
+  showFsMessage(mine ? 'you' : name, text)
+}
+
+// Fullscreen chat popups ------------------------------------------------------
+function fsElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null
+}
+
+function fsContainer() {
+  const fs = fsElement()
+  if (!fs) return null
+  let c = fs.querySelector('.fs-msg-container')
+  if (!c) {
+    c = document.createElement('div')
+    c.className = 'fs-msg-container'
+    fs.appendChild(c)
+  }
+  return c
+}
+
+function showFsMessage(name, text) {
+  const c = fsContainer()
+  if (!c) return   // not fullscreen; nothing to do
+
+  const el = document.createElement('div')
+  el.className = 'fs-msg'
+  const b = document.createElement('b')
+  b.textContent = name || 'you'         // name is raw user input — safe
+  const span = document.createElement('span')
+  span.innerHTML = text                 // text is already HTML-escaped by caller
+  el.appendChild(b)
+  el.appendChild(span)
+  c.appendChild(el)
+
+  requestAnimationFrame(() => el.classList.add('show'))
+
+  const dismiss = () => {
+    el.classList.remove('show')
+    el.classList.add('hide')
+    setTimeout(() => el.remove(), 250)
+  }
+
+  let timer = setTimeout(dismiss, 3000)
+
+  // Swipe / drag to dismiss (any direction, >40px)
+  let sx = 0, sy = 0, dragging = false, pid = null
+  el.addEventListener('pointerdown', e => {
+    dragging = true; pid = e.pointerId; sx = e.clientX; sy = e.clientY
+    try { el.setPointerCapture(pid) } catch {}
+    clearTimeout(timer)
+  })
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return
+    const dx = e.clientX - sx, dy = e.clientY - sy
+    el.style.transform = `translate(${dx}px, ${dy}px)`
+    el.style.opacity = String(Math.max(0, 1 - Math.hypot(dx, dy) / 120))
+  })
+  const end = e => {
+    if (!dragging) return
+    dragging = false
+    const dx = e.clientX - sx, dy = e.clientY - sy
+    if (Math.hypot(dx, dy) > 40) {
+      dismiss()
+    } else {
+      el.style.transform = ''
+      el.style.opacity = ''
+      clearTimeout(timer)
+      timer = setTimeout(dismiss, 1500)
+    }
+  }
+  el.addEventListener('pointerup', end)
+  el.addEventListener('pointercancel', () => {
+    dragging = false
+    el.style.transform = ''
+    el.style.opacity = ''
+  })
+}
+
+// Clean up when leaving fullscreen
+function cleanupFsMessages() {
+  if (fsElement()) return
+  document.querySelectorAll('.fs-msg').forEach(el => el.remove())
+  document.querySelectorAll('.fs-msg-container').forEach(el => el.remove())
+  document.querySelectorAll('.fs-chat').forEach(el => el.remove())
+}
+document.addEventListener('fullscreenchange', cleanupFsMessages)
+document.addEventListener('webkitfullscreenchange', cleanupFsMessages)
+
+// Fullscreen chat input (pull-down handle) -----------------------------------
+function ensureFsChat() {
+  const fs = fsElement()
+  if (!fs) return null
+  let root = fs.querySelector('.fs-chat')
+  if (root) return root
+
+  root = document.createElement('div')
+  root.className = 'fs-chat'
+  root.innerHTML = `
+    <div class="fs-chat-handle" role="button" aria-label="Open chat">
+      <div class="fs-chat-bar"></div>
+    </div>
+    <div class="fs-chat-input-wrap">
+      <input class="fs-chat-input" type="text" placeholder="Message…" autocomplete="off" enterkeyhint="send" />
+      <button class="fs-chat-close" aria-label="Close" type="button">×</button>
+    </div>
+  `
+  fs.appendChild(root)
+
+  const handle   = root.querySelector('.fs-chat-handle')
+  const input    = root.querySelector('.fs-chat-input')
+  const closeBtn = root.querySelector('.fs-chat-close')
+
+  const open = () => {
+    root.classList.add('open')
+    // Must fire inside the gesture to open the mobile keyboard.
+    setTimeout(() => input.focus(), 60)
+  }
+  const close = () => {
+    root.classList.remove('open')
+    input.blur()
+  }
+  const toggle = () => root.classList.contains('open') ? close() : open()
+
+  let sy = 0, dragging = false
+  handle.addEventListener('pointerdown', e => {
+    dragging = true
+    sy = e.clientY
+    try { handle.setPointerCapture(e.pointerId) } catch {}
+  })
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return
+    const dy = e.clientY - sy
+    if (dy >  20 && !root.classList.contains('open')) { open();  dragging = false }
+    if (dy < -20 &&  root.classList.contains('open')) { close(); dragging = false }
+  })
+  const endDrag = e => {
+    if (!dragging) return
+    dragging = false
+    const dy = e.clientY - sy
+    if (dy >  8) open()
+    else if (dy < -8) close()
+    else toggle()          // treated as a tap
+  }
+  handle.addEventListener('pointerup', endDrag)
+  handle.addEventListener('pointercancel', () => { dragging = false })
+
+  closeBtn.addEventListener('click', close)
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const text = input.value.trim()
+      if (!text) return
+      sendChat(text)
+      bubble('', escapeHtml(text), true)
+      input.value = ''
+      // Keep input open so the user can send another message; keyboard stays up.
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      close()
+    }
+  })
+  return root
+}
+
+// Entering fullscreen → attach the handle. Leaving → cleanup runs above.
+document.addEventListener('fullscreenchange', () => { ensureFsChat() })
+document.addEventListener('webkitfullscreenchange', () => { ensureFsChat() })
+
+// Global "tap outside to close" — registered once, not per fullscreen session.
+document.addEventListener('pointerdown', e => {
+  const openChat = document.querySelector('.fs-chat.open')
+  if (!openChat) return
+  if (openChat.contains(e.target)) return
+  openChat.classList.remove('open')
+  const inp = openChat.querySelector('.fs-chat-input')
+  if (inp) inp.blur()
+}, true)
+
+// Auto fullscreen on landscape rotation (mobile only) -------------------------
+function isMobileDevice() {
+  return matchMedia('(hover: none) and (pointer: coarse)').matches
+}
+
+function isLandscape() {
+  if (screen.orientation && screen.orientation.type) {
+    return screen.orientation.type.startsWith('landscape')
+  }
+  return window.innerWidth > window.innerHeight
+}
+
+async function handleOrientationChange() {
+  if (!isMobileDevice()) return
+  if (!$('app').classList.contains('show')) return     // not joined yet
+  if (!v.src) return                                    // no video loaded
+  if (!player.fullscreen.enabled) return                // browser doesn't support it
+  try {
+    if (isLandscape() && !player.fullscreen.active) {
+      await player.fullscreen.enter()
+    } else if (!isLandscape() && player.fullscreen.active) {
+      await player.fullscreen.exit()
+    }
+  } catch (e) {
+    console.debug('[pulse] auto-fullscreen blocked:', e && e.message)
+  }
+}
+
+if (screen.orientation && screen.orientation.addEventListener) {
+  screen.orientation.addEventListener('change', handleOrientationChange)
+} else {
+  window.addEventListener('orientationchange', () => {
+    setTimeout(handleOrientationChange, 200)   // give browser time to update dims
+  })
 }
 function sys(text) {
   chat.insertAdjacentHTML('beforeend', `<div class="sys">${text}</div>`)
@@ -281,6 +637,7 @@ function loadFile(f) {
     if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
     v.onloadedmetadata = null
     if (connected) { snapped = false; sendPosReq() }
+    handleOrientationChange()
   }
   $('hint').style.display = 'none'
 }
@@ -291,19 +648,37 @@ $('file').onchange = e => loadFile(e.target.files[0])
 ;['dragover', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => e.preventDefault()))
 dropzone.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]))
 
+function friendlyConnectError(err) {
+  const m = String((err && err.message) || err || '')
+  if (/CHANNEL_ERROR|TIMED_OUT|CLOSED|subscribe timeout/i.test(m))
+    return 'Could not reach the room server. Check your connection and try again.'
+  if (/^auth:/i.test(m))
+    return 'Sign-in failed. Try again.'
+  return m || 'Could not connect.'
+}
+
 $('joinForm').onsubmit = async e => {
   e.preventDefault()
+  const btn = $('joinBtn')
+  if (btn.disabled) return
+
   const room = $('room').value.trim(), nick = $('nick').value.trim(), pass = $('pass').value.trim()
   localStorage.setItem('pulse.room', room)
   localStorage.setItem('pulse.nick', nick)
   localStorage.setItem('pulse.pass', pass)
+
   $('splashErr').textContent = ''
+  $('splashProg').textContent = ''
+  btn.disabled = true
+  btn.innerHTML = '<span class="spin"></span>Joining…'
+
   try {
     await connect(room, nick, pass, {
       onEvent,
       onMembers: renderMembers,
       onHost: setHost,
       onStatus: setStatus,
+      onProgress: msg => { $('splashProg').textContent = msg },
     })
     connected = true
     $('roomLabel').textContent = room
@@ -313,7 +688,10 @@ $('joinForm').onsubmit = async e => {
     applyHostLock()
     sendPosReq()   // late-join snap
   } catch (err) {
-    $('splashErr').textContent = 'Could not connect: ' + err.message
+    $('splashErr').textContent = friendlyConnectError(err)
+    $('splashProg').textContent = ''
+    btn.disabled = false
+    btn.innerHTML = '<span>Try again</span>'
   }
 }
 
