@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse</title>
+<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
 <style>
   :root {
     --bg: #0b0d12; --panel: #12151c; --panel2: #191d27; --line: #262b36;
@@ -13,7 +14,7 @@
   body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
 
   #splash { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 50; }
-  #splash form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; width: 300px; display: flex; flex-direction: column; gap: 12px; }
+  #splash form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; width: 300px; max-width: calc(100vw - 32px); display: flex; flex-direction: column; gap: 12px; }
   #splash h1 { margin: 0 0 4px; font-size: 20px; display: flex; align-items: center; gap: 8px; }
   #splash h1 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
   #splash p { margin: 0 0 8px; color: var(--dim); font-size: 13px; }
@@ -38,10 +39,12 @@
   #members { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
   .avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
   .avatar.ready::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
+  .avatar.host { box-shadow: 0 0 0 2px var(--warn); }
 
   #layout { flex: 1; display: flex; min-height: 0; }
   #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
-  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; }
+  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; aspect-ratio: 16/9; }
+  @media (min-width: 721px) { #dropzone { aspect-ratio: auto; } }
   video { width: 100%; height: 100%; border-radius: 10px; background: #000; }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
@@ -50,6 +53,8 @@
   .btn { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
   .btn:hover { border-color: var(--accent); }
   .btn.busy { color: var(--warn); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--line); }
   #toast { font-size: 12px; color: var(--dim); }
 
   #reactions { display: flex; gap: 4px; }
@@ -71,8 +76,48 @@
   #chatbar button { background: var(--accent); border: none; color: #0b0d12; font-weight: 600; padding: 0 14px; border-radius: 8px; cursor: pointer; }
 
   @media (max-width: 720px) {
-    #layout { flex-direction: column; }
-    #side { width: 100%; height: 220px; border-left: none; border-top: 1px solid var(--line); }
+    body { height: 100dvh; overflow: hidden; }
+    #app { height: 100dvh; }
+    #topbar { padding: 8px 10px; gap: 8px; flex-wrap: wrap; }
+    #topbar b { font-size: 13px; }
+    .pill { font-size: 11px; padding: 3px 8px; }
+    #readyBtn { font-size: 11px; padding: 5px 10px; }
+
+    #layout { flex-direction: column; min-height: 0; }
+    #main { padding: 8px; gap: 8px; }
+    #dropzone { flex: 1; min-height: 0; }
+    video { border-radius: 8px; }
+
+    #side {
+      width: 100%;
+      height: 38vh;
+      border-left: none;
+      border-top: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+    #chat { padding: 8px; font-size: 12px; }
+    .msg { max-width: 85%; font-size: 12px; padding: 5px 8px; }
+    #chatbar { padding: 6px; }
+    #chatbar input { font-size: 13px; padding: 8px 8px; }
+    #chatbar button { padding: 0 10px; font-size: 13px; }
+
+    .bar { gap: 6px; }
+    .btn { padding: 7px 10px; font-size: 12px; }
+    #reactions button { padding: 3px 6px; font-size: 14px; }
+    #toast { font-size: 11px; width: 100%; }
+
+    #members .avatar { width: 22px; height: 22px; font-size: 10px; }
+  }
+
+  @media (max-width: 420px) {
+    #topbar { padding: 6px 8px; }
+    .pill { font-size: 10px; padding: 2px 6px; }
+    #readyBtn { font-size: 10px; padding: 4px 8px; }
+    #side { height: 42vh; }
+    .bar { flex-wrap: wrap; }
+    .btn { flex: 1; min-width: 0; justify-content: center; }
+    #reactions { width: 100%; justify-content: space-between; }
+    #reactions button { flex: 1; text-align: center; }
   }
 </style>
 
@@ -92,6 +137,7 @@
   <div id="topbar">
     <b id="roomLabel"></b>
     <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
+    <span class="pill" id="hostPill">👑 <span id="hostText">…</span></span>
     <button id="readyBtn">○ Not ready</button>
     <div id="members"></div>
   </div>
@@ -131,14 +177,28 @@
   </div>
 </div>
 
+<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 <script type="module">
-import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady } from './pulse.js'
+import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId } from './pulse.js'
 import { hashFrame, findOffset } from './fingerprint.js'
 
 const $ = id => document.getElementById(id)
 const v = $('v'), chat = $('chat'), toast = $('toast'), dropzone = $('dropzone')
+
+const player = new Plyr(v, {
+  controls: ['play-large', 'play', 'progress', 'current-time', 'duration',
+             'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+  settings: ['speed'],
+  speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+  keyboard: { focused: true, global: true },
+  tooltips: { controls: true, seek: true },
+  seekTime: 10,
+  invertTime: false,
+  hideControls: true,
+})
 let offset = 0, applying = false, connected = false, fileKey = null
 let iAmReady = false, snapped = false
+let hostId = null, lastMembers = []
 
 const remembered = {
   room: localStorage.getItem('pulse.room') || '',
@@ -169,6 +229,35 @@ function say(text, ms = 4000) {
   clearTimeout(say._t)
   say._t = setTimeout(() => { if (toast.textContent === text) toast.textContent = '' }, ms)
 }
+function renderMembers(members) {
+  if (members) lastMembers = members
+  $('members').innerHTML = lastMembers.map(m => {
+    const isHost = m.user_id && m.user_id === hostId
+    return `<div class="avatar ${m.ready ? 'ready' : ''} ${isHost ? 'host' : ''}" title="${m.name}${m.ready ? ' (ready)' : ''}${isHost ? ' · host' : ''}">${m.name.slice(0, 2).toUpperCase()}</div>`
+  }).join('')
+}
+
+function setHost(id) {
+  const prev = hostId
+  hostId = id
+  const mine = !!id && id === myId()
+  const m = lastMembers.find(x => x.user_id === id)
+  $('hostText').textContent = mine ? 'you' : (m ? m.name : '—')
+  applyHostLock()
+  renderMembers()
+  if (connected && id !== prev) {
+    if (mine) say('You are host 👑')
+    else if (id) say(`${m ? m.name : 'Someone'} is host`)
+  }
+}
+
+function applyHostLock() {
+  const mine = !!hostId && hostId === myId()
+  v.style.pointerEvents = mine ? '' : 'none'
+  $('sync').disabled = !mine
+  $('restart').disabled = !mine
+}
+
 function setStatus(state) {
   const pill = $('status')
   pill.className = 'pill ' + state
@@ -204,10 +293,8 @@ $('joinForm').onsubmit = async e => {
   try {
     await connect(room, nick, pass, {
       onEvent,
-      onMembers: members => {
-        $('members').innerHTML = members.map(m =>
-          `<div class="avatar ${m.ready ? 'ready' : ''}" title="${m.name}${m.ready ? ' (ready)' : ''}">${m.name.slice(0, 2).toUpperCase()}</div>`).join('')
-      },
+      onMembers: renderMembers,
+      onHost: setHost,
       onStatus: setStatus,
     })
     connected = true
@@ -215,6 +302,7 @@ $('joinForm').onsubmit = async e => {
     document.getElementById('splash').style.display = 'none'
     document.getElementById('app').classList.add('show')
     snapped = false
+    applyHostLock()
     sendPosReq()   // late-join snap
   } catch (err) {
     $('splashErr').textContent = 'Could not connect: ' + err.message
@@ -296,16 +384,20 @@ document.querySelectorAll('#reactions button').forEach(btn => {
   }
 })
 
-v.addEventListener('play',  () => { if (connected && !applying) sendPlay(v.currentTime - offset) })
-v.addEventListener('pause', () => { if (connected && !applying) sendPause(v.currentTime - offset) })
+v.addEventListener('play',  () => { if (connected && !applying && hostId === myId()) sendPlay(v.currentTime - offset) })
+v.addEventListener('pause', () => { if (connected && !applying && hostId === myId()) sendPause(v.currentTime - offset) })
 
 $('sync').onclick = () => {
+  if (hostId !== myId()) return say('Only the host can sync')
   const h = hashFrame(v)
   if (!h) return say('Load a video first')
   sendSyncReq(h, v.currentTime - offset)
   say('Sync request sent')
 }
-$('restart').onclick = () => { v.currentTime = 0; if (fileKey) localStorage.removeItem(fileKey) }
+$('restart').onclick = () => {
+  if (hostId !== myId()) return say('Only the host can restart')
+  v.currentTime = 0; if (fileKey) localStorage.removeItem(fileKey)
+}
 
 function post() {
   const box = $('msg'), text = box.value.trim()

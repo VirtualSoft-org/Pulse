@@ -12,6 +12,7 @@ let topic = null
 let live = false
 let retries = 0
 let handlers = {}
+let myJoinedAt = 0
 
 function topicFor(roomId, passphrase) {
   const raw = `${roomId}::${passphrase || ''}`
@@ -22,6 +23,28 @@ function topicFor(roomId, passphrase) {
     h2 = Math.imul(h2 ^ c, 0x85ebca6b)
   }
   return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0')
+}
+
+function computeHost(members) {
+  if (!members.length) return null
+  const sorted = [...members].sort((a, b) =>
+    (a.joinedAt || 0) - (b.joinedAt || 0) ||
+    String(a.user_id || '').localeCompare(String(b.user_id || ''))
+  )
+  return sorted[0].user_id || null
+}
+
+function emitMembers() {
+  if (!presenceCh) return
+  const state = presenceCh.presenceState() || {}
+  const members = Object.values(state).flat().map(m => ({
+    name: m.name || '?',
+    ready: !!m.ready,
+    user_id: m.user_id || null,
+    joinedAt: m.joinedAt || 0,
+  }))
+  handlers.onMembers?.(members)
+  handlers.onHost?.(computeHost(members))
 }
 
 export async function connect(roomId, displayName, passphrase, h = {}) {
@@ -37,6 +60,7 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   me = session.user.id
   myName = displayName || 'guest'
   myReady = false
+  myJoinedAt = Date.now()
   topic = topicFor(roomId, passphrase)
   retries = 0
   live = false
@@ -49,8 +73,7 @@ function open() {
   bcastCh = sb.channel(`pulse:b:${topic}`, { config: { broadcast: { self: false } } })
 
   presenceCh.on('presence', { event: 'sync' }, () => {
-    const state = presenceCh.presenceState() || {}
-    handlers.onMembers?.(Object.values(state).flat().map(m => ({ name: m.name || '?', ready: !!m.ready })))
+    emitMembers()
   })
 
   bcastCh.on('broadcast', { event: 'e' }, ({ payload }) => {
@@ -79,7 +102,7 @@ function open() {
       live = true
       retries = 0
       handlers.onStatus?.('connected')
-      await presenceCh.track({ name: myName, user_id: me, ready: myReady })
+      await presenceCh.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt })
       startPresencePoll()
     })
 }
@@ -120,7 +143,7 @@ export const sendPosRes  = (to, at, playing) => send({ t: 'pos_res', to, at, pla
 
 export async function setReady(ready) {
   myReady = ready
-  if (presenceCh && live) { try { await presenceCh.track({ name: myName, user_id: me, ready: myReady }) } catch {} }
+  if (presenceCh && live) { try { await presenceCh.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt }) } catch {} }
 }
 
 export function myId() { return me }
@@ -140,9 +163,14 @@ function startPresencePoll() {
   pollTimer = setInterval(() => {
     if (!presenceCh) return
     const state = presenceCh.presenceState() || {}
-    const members = Object.values(state).flat().map(m => ({ name: m.name || '?', ready: !!m.ready }))
-    const key = members.map(m => m.name + (m.ready ? '1' : '0')).sort().join(',')
-    if (key !== last) { last = key; handlers.onMembers?.(members) }
+    const members = Object.values(state).flat().map(m => ({
+      name: m.name || '?',
+      ready: !!m.ready,
+      user_id: m.user_id || null,
+      joinedAt: m.joinedAt || 0,
+    }))
+    const key = members.map(m => m.user_id + (m.ready ? '1' : '0') + m.name).sort().join(',')
+    if (key !== last) { last = key; emitMembers() }
   }, 1200)
 }
 function stopPresencePoll() {
