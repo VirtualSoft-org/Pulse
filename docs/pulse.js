@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.115.0'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -120,7 +120,7 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
 function open() {
   ch = sb.channel(`pulse:${topic}`, {
     config: {
-      presence: { key: tabId },
+      presence: { key: tabId, enabled: true },
       broadcast: { self: false },
     },
   })
@@ -147,9 +147,10 @@ function open() {
         if (settled) return
         settled = true
         try {
-          await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt })
+          const result = await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt })
+          console.log('[pulse] track result:', result)
         } catch (e) {
-          console.warn('[pulse] track failed', e)
+          console.error('[pulse] track failed:', e)
         }
         resolve()
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
