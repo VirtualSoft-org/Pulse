@@ -49,12 +49,16 @@
   .avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
   .avatar.ready::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
   .avatar.host { box-shadow: 0 0 0 2px var(--warn); }
-
+  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; }
+  /* On mobile the video's native aspect ratio is applied via JS after load.
+     Until then, default to 16/9 to avoid layout jumps. */
+  @media (max-width: 720px) { #dropzone { aspect-ratio: 16/9; max-height: 60vh; } }
   #layout { flex: 1; display: flex; min-height: 0; }
   #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
-  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; aspect-ratio: 16/9; }
-  @media (min-width: 721px) { #dropzone { aspect-ratio: auto; } }
-  video { width: 100%; height: 100%; border-radius: 10px; background: #000; }
+  #dropzone.locked .plyr { pointer-events: none !important; }
+  #dropzone.locked .plyr__controls { opacity: 0.35; }
+
+  video { width: 100%; height: 100%; border-radius: 10px; background: #000; object-fit: contain; }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 
@@ -199,6 +203,33 @@
     .fs-chat { right: 8px; }
     .fs-chat-input-wrap { width: 200px; }
   }
+
+  /* Mobile landscape pseudo-fullscreen (no gesture needed, works everywhere).
+     Applied via body.mobile-landscape-fs when the device rotates to landscape
+     and native fullscreen is unavailable or blocked. */
+  body.mobile-landscape-fs #topbar,
+  body.mobile-landscape-fs #side,
+  body.mobile-landscape-fs .bar,
+  body.mobile-landscape-fs #hint { display: none !important; }
+
+  body.mobile-landscape-fs #app,
+  body.mobile-landscape-fs #layout,
+  body.mobile-landscape-fs #main {
+    height: 100dvh;
+    padding: 0;
+    gap: 0;
+  }
+
+  body.mobile-landscape-fs #dropzone {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    border-radius: 0;
+    aspect-ratio: auto !important;
+    max-height: none !important;
+    background: #000;
+  }
+  body.mobile-landscape-fs video { border-radius: 0; }
 
   @media (max-width: 720px) {
     .fs-msg-container { bottom: 80px; max-width: 90%; }
@@ -528,8 +559,14 @@ function ensureFsChat() {
 }
 
 // Entering fullscreen → attach the handle. Leaving → cleanup runs above.
-document.addEventListener('fullscreenchange', () => { ensureFsChat() })
-document.addEventListener('webkitfullscreenchange', () => { ensureFsChat() })
+document.addEventListener('fullscreenchange', () => {
+  ensureFsChat()
+  applyMobileLandscapeClass()
+})
+document.addEventListener('webkitfullscreenchange', () => {
+  ensureFsChat()
+  applyMobileLandscapeClass()
+})
 
 // Global "tap outside to close" — registered once, not per fullscreen session.
 document.addEventListener('pointerdown', e => {
@@ -553,11 +590,33 @@ function isLandscape() {
   return window.innerWidth > window.innerHeight
 }
 
+function nativeFsElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null
+}
+
+function applyMobileLandscapeClass() {
+  // Don't fight native fullscreen: if it's active, keep the class off.
+  if (nativeFsElement()) {
+    document.body.classList.remove('mobile-landscape-fs')
+    return
+  }
+  const eligible = isMobileDevice()
+    && $('app').classList.contains('show')
+    && !!v.src
+  document.body.classList.toggle('mobile-landscape-fs', eligible && isLandscape())
+}
+
 async function handleOrientationChange() {
+  // CSS pseudo-fullscreen is the primary path — no user gesture required,
+  // works on iOS Safari and every Android browser.
+  applyMobileLandscapeClass()
+
+  // Best-effort: also try real fullscreen so the user gets OS chrome hidden
+  // where the browser permits it (mostly Android Chrome).
   if (!isMobileDevice()) return
-  if (!$('app').classList.contains('show')) return     // not joined yet
-  if (!v.src) return                                    // no video loaded
-  if (!player.fullscreen.enabled) return                // browser doesn't support it
+  if (!$('app').classList.contains('show')) return
+  if (!v.src) return
+  if (!player.fullscreen.enabled) return
   try {
     if (isLandscape() && !player.fullscreen.active) {
       await player.fullscreen.enter()
@@ -565,7 +624,7 @@ async function handleOrientationChange() {
       await player.fullscreen.exit()
     }
   } catch (e) {
-    console.debug('[pulse] auto-fullscreen blocked:', e && e.message)
+    console.debug('[pulse] native fullscreen blocked, CSS fallback active:', e && e.message)
   }
 }
 
@@ -610,14 +669,8 @@ function setHost(id) {
 }
 
 function applyHostLock() {
-  if (!hostId) {
-    v.style.pointerEvents = ''
-    $('sync').disabled = false
-    $('restart').disabled = false
-    return
-  }
-  const mine = hostId === myId()
-  v.style.pointerEvents = mine ? '' : 'none'
+  const mine = !hostId || hostId === myId()
+  dropzone.classList.toggle('locked', !mine)
   $('sync').disabled = !mine
   $('restart').disabled = !mine
 }
@@ -635,9 +688,13 @@ function loadFile(f) {
   v.onloadedmetadata = () => {
     const saved = parseFloat(localStorage.getItem(fileKey))
     if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
+    if (v.videoWidth && v.videoHeight) {
+      dropzone.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`
+    }
     v.onloadedmetadata = null
     if (connected) { snapped = false; sendPosReq() }
     handleOrientationChange()
+    applyMobileLandscapeClass()
   }
   $('hint').style.display = 'none'
 }
@@ -708,12 +765,14 @@ function onEvent(e) {
   if (e.t === 'play') {
     const lag = Math.min(2, Math.max(0, (Date.now() - e.sentAt) / 1000))
     const target = e.at + offset + lag
+    roomPlaying = true
     applying = true
     if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
     v.play().catch(() => {}).finally(() => setTimeout(() => applying = false, 250))
     sys(`${e.name} pressed play`)
   }
   if (e.t === 'pause') {
+    roomPlaying = false
     applying = true
     v.pause()
     const target = e.at + offset
@@ -770,8 +829,27 @@ document.querySelectorAll('#reactions button').forEach(btn => {
   }
 })
 
-v.addEventListener('play',  () => { if (connected && !applying && (!hostId || hostId === myId())) sendPlay(v.currentTime - offset) })
-v.addEventListener('pause', () => { if (connected && !applying && (!hostId || hostId === myId())) sendPause(v.currentTime - offset) })
+let roomPlaying = false
+
+function enforceRoomState() {
+  if (applying) return
+  if (!hostId || hostId === myId()) return
+  applying = true
+  if (roomPlaying && v.paused) v.play().catch(() => {})
+  else if (!roomPlaying && !v.paused) v.pause()
+  setTimeout(() => { applying = false }, 250)
+}
+
+v.addEventListener('play', () => {
+  if (applying) return
+  if (hostId && hostId !== myId()) { enforceRoomState(); return }
+  if (connected) sendPlay(v.currentTime - offset)
+})
+v.addEventListener('pause', () => {
+  if (applying) return
+  if (hostId && hostId !== myId()) { enforceRoomState(); return }
+  if (connected) sendPause(v.currentTime - offset)
+})
 
 $('sync').onclick = () => {
   if (hostId && hostId !== myId()) return say('Only the host can sync')
