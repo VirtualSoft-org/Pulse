@@ -55,8 +55,16 @@
   @media (max-width: 720px) { #dropzone { aspect-ratio: 16/9; max-height: 60vh; } }
   #layout { flex: 1; display: flex; min-height: 0; }
   #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
-  #dropzone.locked .plyr { pointer-events: none !important; }
-  #dropzone.locked .plyr__controls { opacity: 0.35; }
+  /* Non-host: block play/pause/seek, keep volume / fullscreen / settings / PiP */
+  #dropzone.locked .plyr__control--overlaid,
+  #dropzone.locked .plyr__control--play,
+  #dropzone.locked .plyr__progress,
+  #dropzone.locked .plyr__video-wrapper,
+  #dropzone.locked .plyr__poster {
+    pointer-events: none !important;
+  }
+  #dropzone.locked .plyr__control--overlaid,
+  #dropzone.locked .plyr__control--play { opacity: .35; }
 
   video { width: 100%; height: 100%; border-radius: 10px; background: #000; object-fit: contain; }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
@@ -203,33 +211,6 @@
     .fs-chat { right: 8px; }
     .fs-chat-input-wrap { width: 200px; }
   }
-
-  /* Mobile landscape pseudo-fullscreen (no gesture needed, works everywhere).
-     Applied via body.mobile-landscape-fs when the device rotates to landscape
-     and native fullscreen is unavailable or blocked. */
-  body.mobile-landscape-fs #topbar,
-  body.mobile-landscape-fs #side,
-  body.mobile-landscape-fs .bar,
-  body.mobile-landscape-fs #hint { display: none !important; }
-
-  body.mobile-landscape-fs #app,
-  body.mobile-landscape-fs #layout,
-  body.mobile-landscape-fs #main {
-    height: 100dvh;
-    padding: 0;
-    gap: 0;
-  }
-
-  body.mobile-landscape-fs #dropzone {
-    position: fixed;
-    inset: 0;
-    z-index: 900;
-    border-radius: 0;
-    aspect-ratio: auto !important;
-    max-height: none !important;
-    background: #000;
-  }
-  body.mobile-landscape-fs video { border-radius: 0; }
 
   @media (max-width: 720px) {
     .fs-msg-container { bottom: 80px; max-width: 90%; }
@@ -559,14 +540,8 @@ function ensureFsChat() {
 }
 
 // Entering fullscreen → attach the handle. Leaving → cleanup runs above.
-document.addEventListener('fullscreenchange', () => {
-  ensureFsChat()
-  applyMobileLandscapeClass()
-})
-document.addEventListener('webkitfullscreenchange', () => {
-  ensureFsChat()
-  applyMobileLandscapeClass()
-})
+document.addEventListener('fullscreenchange', () => { ensureFsChat() })
+document.addEventListener('webkitfullscreenchange', () => { ensureFsChat() })
 
 // Global "tap outside to close" — registered once, not per fullscreen session.
 document.addEventListener('pointerdown', e => {
@@ -590,29 +565,7 @@ function isLandscape() {
   return window.innerWidth > window.innerHeight
 }
 
-function nativeFsElement() {
-  return document.fullscreenElement || document.webkitFullscreenElement || null
-}
-
-function applyMobileLandscapeClass() {
-  // Don't fight native fullscreen: if it's active, keep the class off.
-  if (nativeFsElement()) {
-    document.body.classList.remove('mobile-landscape-fs')
-    return
-  }
-  const eligible = isMobileDevice()
-    && $('app').classList.contains('show')
-    && !!v.src
-  document.body.classList.toggle('mobile-landscape-fs', eligible && isLandscape())
-}
-
 async function handleOrientationChange() {
-  // CSS pseudo-fullscreen is the primary path — no user gesture required,
-  // works on iOS Safari and every Android browser.
-  applyMobileLandscapeClass()
-
-  // Best-effort: also try real fullscreen so the user gets OS chrome hidden
-  // where the browser permits it (mostly Android Chrome).
   if (!isMobileDevice()) return
   if (!$('app').classList.contains('show')) return
   if (!v.src) return
@@ -624,7 +577,7 @@ async function handleOrientationChange() {
       await player.fullscreen.exit()
     }
   } catch (e) {
-    console.debug('[pulse] native fullscreen blocked, CSS fallback active:', e && e.message)
+    console.debug('[pulse] auto-fullscreen blocked:', e && e.message)
   }
 }
 
@@ -694,7 +647,6 @@ function loadFile(f) {
     v.onloadedmetadata = null
     if (connected) { snapped = false; sendPosReq() }
     handleOrientationChange()
-    applyMobileLandscapeClass()
   }
   $('hint').style.display = 'none'
 }
