@@ -13,6 +13,8 @@ let topic = null
 let live = false
 let retries = 0
 let handlers = {}
+let manualHostId = null
+let manualHostAt = 0
 
 const memberMap = new Map()   // tabId -> { name, ready, joinedAt, lastSeen }
 let pollTimer = null
@@ -41,6 +43,16 @@ function topicFor(roomId, passphrase) {
 
 function computeHost(members) {
   if (!members.length) return null
+  // Manual override: pick the newest non-null hostHint across all members.
+  let hintId = null, hintAt = 0
+  for (const m of members) {
+    if (m.hostHint && (m.hostHintAt || 0) > hintAt) {
+      hintId = m.hostHint
+      hintAt = m.hostHintAt || 0
+    }
+  }
+  if (hintId && members.some(m => m.user_id === hintId)) return hintId
+  // Fallback: earliest joinedAt.
   const sorted = [...members].sort((a, b) =>
     (a.joinedAt || 0) - (b.joinedAt || 0) ||
     String(a.user_id || '').localeCompare(String(b.user_id || ''))
@@ -48,10 +60,20 @@ function computeHost(members) {
   return sorted[0].user_id || null
 }
 
+function retrack() {
+  if (!ch || !live) return Promise.resolve()
+  return ch.track({
+    name: myName, ready: myReady, joinedAt: myJoinedAt,
+    hostHint: manualHostId, hostHintAt: manualHostAt,
+  }).catch(e => console.warn('[pulse] retrack failed', e))
+}
+
 function emitMembers() {
   if (tabId) {
     memberMap.set(tabId, {
-      name: myName, ready: myReady, joinedAt: myJoinedAt, lastSeen: Date.now(),
+      name: myName, ready: myReady, joinedAt: myJoinedAt,
+      hostHint: manualHostId, hostHintAt: manualHostAt,
+      lastSeen: Date.now(),
     })
   }
 
@@ -64,6 +86,8 @@ function emitMembers() {
           name: (p && p.name) || '?',
           ready: !!(p && p.ready),
           joinedAt: (p && p.joinedAt) || 0,
+          hostHint: (p && p.hostHint) || null,
+          hostHintAt: (p && p.hostHintAt) || 0,
           lastSeen: Date.now(),
         })
       }
@@ -79,6 +103,7 @@ function emitMembers() {
 
   const members = [...memberMap.entries()].map(([uid, m]) => ({
     user_id: uid, name: m.name, ready: m.ready, joinedAt: m.joinedAt,
+    hostHint: m.hostHint || null, hostHintAt: m.hostHintAt || 0,
   }))
 
   handlers.onMembers?.(members)
@@ -147,6 +172,14 @@ async function open() {
 
   ch.on('broadcast', { event: 'e' }, ({ payload }) => {
     if (!payload || payload.from === tabId) return
+    // host_transfer: `to` is the NEW host, not the recipient — handle before the filter.
+    if (payload.t === 'host_transfer') {
+      if (!payload.to) return
+      manualHostId = payload.to
+      manualHostAt = payload.at || Date.now()
+      retrack().then(emitMembers)
+      return
+    }
     if (payload.to && payload.to !== tabId) return
     handlers.onEvent?.(payload)
   })
@@ -163,8 +196,7 @@ async function open() {
         if (settled) return
         settled = true
         try {
-          const result = await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt })
-          console.log('[pulse] track result:', result)
+          await retrack()
         } catch (e) {
           console.error('[pulse] track failed:', e)
         }
@@ -208,6 +240,7 @@ function send(e) {
 
 export const sendPlay     = at            => send({ t: 'play', at, sentAt: Date.now() })
 export const sendPause    = at            => send({ t: 'pause', at })
+export const sendSeek     = at            => send({ t: 'seek', at })
 export const sendChat     = text          => send({ t: 'chat', text })
 export const sendSyncReq  = (hash, at)    => send({ t: 'sync_req', hash, at })
 export const sendSyncRes  = (to, ok, off) => send({ t: 'sync_res', to, ok, offset: off })
@@ -218,12 +251,20 @@ export const sendPosRes   = (to, at, playing) => send({ t: 'pos_res', to, at, pl
 export async function setReady(ready) {
   myReady = ready
   if (ch && live) {
-    try { await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt }) } catch {}
+    await retrack()
     emitMembers()
   }
 }
 
 export function myId() { return tabId }
+
+export function transferHost(toTabId) {
+  if (!toTabId || toTabId === tabId) return
+  manualHostId = toTabId
+  manualHostAt = Date.now()
+  retrack().then(emitMembers)
+  return send({ t: 'host_transfer', to: toTabId, at: manualHostAt })
+}
 
 export async function disconnect() {
   stopPoll()

@@ -48,6 +48,36 @@
   .avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
   .avatar.ready::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
   .avatar.host { box-shadow: 0 0 0 2px var(--warn); }
+
+  .host-picker {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 200;
+    min-width: 140px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  }
+  .host-picker.hidden { display: none; }
+  .host-pick {
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    padding: 7px 10px;
+    border-radius: 6px;
+    text-align: left;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .host-pick:hover { background: var(--panel2); }
   #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; }
   /* On mobile the video's native aspect ratio is applied via JS after load.
      Until then, default to 16/9 to avoid layout jumps. */
@@ -349,7 +379,7 @@
   <div id="topbar">
     <b id="roomLabel"></b>
     <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
-    <span class="pill" id="hostPill">👑 <span id="hostText">…</span></span>
+    <span class="pill" id="hostPill" style="position:relative">👑 <span id="hostText">…</span><div id="hostPicker" class="host-picker hidden"></div></span>
     <button id="readyBtn">○ Not ready</button>
     <div id="members"></div>
   </div>
@@ -398,7 +428,7 @@
 </div>
 
 <script type="module">
-import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId } from './pulse.js'
+import { connect, sendPlay, sendPause, sendSeek, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId, transferHost } from './pulse.js'
 import { hashFrame, findOffset } from './fingerprint.js'
 
 const $ = id => document.getElementById(id)
@@ -407,6 +437,7 @@ const v = $('v'), chat = $('chat'), toast = $('toast'), dropzone = $('dropzone')
 let offset = 0, applying = false, connected = false, fileKey = null
 let iAmReady = false, snapped = false
 let hostId = null, lastMembers = []
+let roomPlaying = false
 
 const remembered = {
   room: localStorage.getItem('pulse.room') || '',
@@ -664,7 +695,17 @@ function setHost(id) {
   const my = myId()
   const mine = !!id && id === my
   const m = lastMembers.find(x => x.user_id === id)
-  $('hostText').textContent = mine ? 'you' : (m ? m.name : '—')
+  $('hostText').textContent = mine ? 'you ▾' : (m ? m.name : '—')
+  const pill = $('hostPill')
+  if (pill) {
+    pill.style.cursor = mine ? 'pointer' : 'default'
+    pill.title = mine ? 'Click to transfer host' : 'Host'
+  }
+  // Close any open picker if we're no longer host.
+  if (!mine) {
+    const picker = $('hostPicker')
+    if (picker) picker.classList.add('hidden')
+  }
   applyHostLock()
   renderMembers()
   console.log('[pulse] host set:', id, '| me:', my, '| mine:', mine)
@@ -683,6 +724,41 @@ function applyHostLock() {
   if (p) p.disabled = !mine
   if (s) s.disabled = !mine
 }
+
+function openHostPicker() {
+  const picker = $('hostPicker')
+  const others = lastMembers.filter(m => m.user_id && m.user_id !== myId())
+  if (!others.length) { say('No one else in the room'); return }
+  picker.innerHTML = others.map(m =>
+    `<button class="host-pick" data-id="${m.user_id}">${escapeHtml(m.name)}</button>`
+  ).join('')
+  picker.classList.remove('hidden')
+  picker.querySelectorAll('.host-pick').forEach(btn => {
+    btn.onclick = ev => {
+      ev.stopPropagation()
+      transferHost(btn.dataset.id)
+      say(`Host transferred to ${btn.textContent}`)
+      picker.classList.add('hidden')
+    }
+  })
+}
+
+$('hostPill').onclick = e => {
+  e.stopPropagation()
+  if (!connected) return
+  if (hostId !== myId()) return
+  const picker = $('hostPicker')
+  if (picker.classList.contains('hidden')) openHostPicker()
+  else picker.classList.add('hidden')
+}
+
+document.addEventListener('click', e => {
+  const picker = $('hostPicker')
+  if (!picker || picker.classList.contains('hidden')) return
+  if (picker.contains(e.target)) return
+  if (e.target.closest('#hostPill')) return
+  picker.classList.add('hidden')
+})
 
 function setStatus(state) {
   const pill = $('status')
@@ -788,6 +864,13 @@ function onEvent(e) {
     setTimeout(() => applying = false, 250)
     sys(`${e.name} paused`)
   }
+  if (e.t === 'seek') {
+    const target = e.at + offset
+    applying = true
+    if (Math.abs(v.currentTime - target) > 0.3) v.currentTime = target
+    setTimeout(() => applying = false, 250)
+    sys(`${e.name} seeked to ${fmt(target)}`)
+  }
   if (e.t === 'sync_req') runSync(e)
   if (e.t === 'sync_res') sys(e.ok ? `${e.name} synced (${e.offset.toFixed(2)}s offset)` : `${e.name} couldn't find a match`)
   if (e.t === 'reaction') spawnReaction(e.emoji, e.name)
@@ -799,10 +882,18 @@ function onEvent(e) {
   if (e.t === 'pos_res') {
     if (snapped || !v.duration) return
     snapped = true
+    roomPlaying = !!e.playing
     const lag = e.playing ? Math.min(2, Math.max(0, (Date.now() - e.sentAt) / 1000)) : 0
     const target = e.at + offset + lag
     v.currentTime = target
-    if (e.playing) { applying = true; v.play().catch(() => {}).finally(() => setTimeout(() => applying = false, 250)) }
+    if (e.playing) {
+      applying = true
+      v.play().catch(() => {}).finally(() => setTimeout(() => applying = false, 250))
+    } else {
+      applying = true
+      v.pause()
+      setTimeout(() => applying = false, 250)
+    }
     say(`Jumped to ${e.name}'s position`)
   }
 }
@@ -917,6 +1008,13 @@ $('pcSeek').oninput = e => {
   const d = v.duration || 0
   if (!d) return
   v.currentTime = (parseFloat(e.target.value) / 1000) * d
+}
+// Fires when the user releases the slider (mouse up / touch end / keyboard change).
+// oninput alone would spam the room with seek events on every pixel drag.
+$('pcSeek').onchange = () => {
+  if (!connected) return
+  if (hostId && hostId !== myId()) return
+  sendSeek(v.currentTime - offset)
 }
 $('pcFs').onclick = async () => {
   try {
