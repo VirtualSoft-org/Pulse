@@ -190,7 +190,7 @@ const player = new Plyr(v, {
              'mute', 'volume', 'settings', 'pip', 'fullscreen'],
   settings: ['speed'],
   speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-  keyboard: { focused: true, global: true },
+  keyboard: { focused: true, global: false },
   tooltips: { controls: true, seek: true },
   seekTime: 10,
   invertTime: false,
@@ -240,11 +240,13 @@ function renderMembers(members) {
 function setHost(id) {
   const prev = hostId
   hostId = id
-  const mine = !!id && id === myId()
+  const my = myId()
+  const mine = !!id && id === my
   const m = lastMembers.find(x => x.user_id === id)
   $('hostText').textContent = mine ? 'you' : (m ? m.name : '—')
   applyHostLock()
   renderMembers()
+  console.log('[pulse] host set:', id, '| me:', my, '| mine:', mine)
   if (connected && id !== prev) {
     if (mine) say('You are host 👑')
     else if (id) say(`${m ? m.name : 'Someone'} is host`)
@@ -252,7 +254,13 @@ function setHost(id) {
 }
 
 function applyHostLock() {
-  const mine = !!hostId && hostId === myId()
+  if (!hostId) {
+    v.style.pointerEvents = ''
+    $('sync').disabled = false
+    $('restart').disabled = false
+    return
+  }
+  const mine = hostId === myId()
   v.style.pointerEvents = mine ? '' : 'none'
   $('sync').disabled = !mine
   $('restart').disabled = !mine
@@ -384,18 +392,18 @@ document.querySelectorAll('#reactions button').forEach(btn => {
   }
 })
 
-v.addEventListener('play',  () => { if (connected && !applying && hostId === myId()) sendPlay(v.currentTime - offset) })
-v.addEventListener('pause', () => { if (connected && !applying && hostId === myId()) sendPause(v.currentTime - offset) })
+v.addEventListener('play',  () => { if (connected && !applying && (!hostId || hostId === myId())) sendPlay(v.currentTime - offset) })
+v.addEventListener('pause', () => { if (connected && !applying && (!hostId || hostId === myId())) sendPause(v.currentTime - offset) })
 
 $('sync').onclick = () => {
-  if (hostId !== myId()) return say('Only the host can sync')
+  if (hostId && hostId !== myId()) return say('Only the host can sync')
   const h = hashFrame(v)
   if (!h) return say('Load a video first')
   sendSyncReq(h, v.currentTime - offset)
   say('Sync request sent')
 }
 $('restart').onclick = () => {
-  if (hostId !== myId()) return say('Only the host can restart')
+  if (hostId && hostId !== myId()) return say('Only the host can restart')
   v.currentTime = 0; if (fileKey) localStorage.removeItem(fileKey)
 }
 

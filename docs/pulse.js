@@ -37,12 +37,18 @@ function computeHost(members) {
 function emitMembers() {
   if (!presenceCh) return
   const state = presenceCh.presenceState() || {}
-  const members = Object.values(state).flat().map(m => ({
-    name: m.name || '?',
-    ready: !!m.ready,
-    user_id: m.user_id || null,
-    joinedAt: m.joinedAt || 0,
-  }))
+  const members = []
+  for (const [key, payloads] of Object.entries(state)) {
+    for (const p of payloads) {
+      members.push({
+        name: p.name || '?',
+        ready: !!p.ready,
+        user_id: p.user_id || key,
+        joinedAt: p.joinedAt || 0,
+      })
+    }
+  }
+  console.log('[pulse] presence members:', members)
   handlers.onMembers?.(members)
   handlers.onHost?.(computeHost(members))
 }
@@ -163,13 +169,7 @@ function startPresencePoll() {
   pollTimer = setInterval(() => {
     if (!presenceCh) return
     const state = presenceCh.presenceState() || {}
-    const members = Object.values(state).flat().map(m => ({
-      name: m.name || '?',
-      ready: !!m.ready,
-      user_id: m.user_id || null,
-      joinedAt: m.joinedAt || 0,
-    }))
-    const key = members.map(m => m.user_id + (m.ready ? '1' : '0') + m.name).sort().join(',')
+    const key = JSON.stringify(state)
     if (key !== last) { last = key; emitMembers() }
   }, 1200)
 }
