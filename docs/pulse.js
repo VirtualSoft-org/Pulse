@@ -120,7 +120,7 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
 function open() {
   ch = sb.channel(`pulse:${topic}`, {
     config: {
-      presence: { key: tabId },
+      presence: { key: 'user_id' },
       broadcast: { self: false },
     },
   })
@@ -147,7 +147,7 @@ function open() {
         if (settled) return
         settled = true
         try {
-          await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt })
+          await ch.track({ user_id: tabId, name: myName, ready: myReady, joinedAt: myJoinedAt })
         } catch (e) {
           console.warn('[pulse] track failed', e)
         }
@@ -201,7 +201,7 @@ export const sendPosRes   = (to, at, playing) => send({ t: 'pos_res', to, at, pl
 export async function setReady(ready) {
   myReady = ready
   if (ch && live) {
-    try { await ch.track({ name: myName, ready: myReady, joinedAt: myJoinedAt }) } catch {}
+    try { await ch.track({ user_id: tabId, name: myName, ready: myReady, joinedAt: myJoinedAt }) } catch {}
     emitMembers()
   }
 }
@@ -221,4 +221,5 @@ window.pulseDebug = {
   state: () => ({ presence: ch && ch.state, live, topic, tabId, authId }),
   members: () => Object.fromEntries(memberMap),
   presenceRaw: () => ch && ch.presenceState(),
+  presencePretty: () => JSON.stringify(ch && ch.presenceState(), null, 2),
 }
