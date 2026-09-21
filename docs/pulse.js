@@ -3,14 +3,13 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js'
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: window.sessionStorage,       // per-tab auth, no localStorage collision
-    storageKey: 'pulse.auth',
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
-    // Bypass the Web Locks API. It's used to coordinate token refresh across
-    // tabs, but each tab now has its own session, so there's nothing to
-    // coordinate — and the lock was throwing on background tabs anyway.
+    // Bypass the Web Locks API — it was throwing
+    // 'lock:sb-...-auth-token immediately failed' on the second tab.
+    // Cross-tab coordination isn't needed: both tabs share the same
+    // anonymous session, and per-tab identity comes from sessionStorage tabId.
     lock: async (_name, _timeout, fn) => fn(),
   },
 })
