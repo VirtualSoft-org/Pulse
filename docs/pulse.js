@@ -7,6 +7,7 @@ let presenceCh = null
 let bcastCh = null
 let me = null
 let myName = 'guest'
+let myReady = false
 let topic = null
 let live = false
 let retries = 0
@@ -25,7 +26,7 @@ function topicFor(roomId, passphrase) {
 
 export async function connect(roomId, displayName, passphrase, h = {}) {
   handlers = h
-  await disconnect()   // always start clean, no leftover channels
+  await disconnect()
 
   let { data: { session } } = await sb.auth.getSession()
   if (!session) {
@@ -35,10 +36,10 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   }
   me = session.user.id
   myName = displayName || 'guest'
+  myReady = false
   topic = topicFor(roomId, passphrase)
   retries = 0
   live = false
-  console.log('[pulse] connecting as', myName, me, 'topic', topic)
   await open()
   return me
 }
@@ -49,12 +50,10 @@ function open() {
 
   presenceCh.on('presence', { event: 'sync' }, () => {
     const state = presenceCh.presenceState() || {}
-    console.log('[pulse] presence sync:', state)
-    handlers.onMembers?.(Object.values(state).flat().map(m => m.name || '?'))
+    handlers.onMembers?.(Object.values(state).flat().map(m => ({ name: m.name || '?', ready: !!m.ready })))
   })
 
   bcastCh.on('broadcast', { event: 'e' }, ({ payload }) => {
-    console.log('[pulse] broadcast received:', payload)
     if (!payload || payload.from === me) return
     if (payload.to && payload.to !== me) return
     handlers.onEvent?.(payload)
@@ -64,7 +63,6 @@ function open() {
     let settled = false
     const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error(label + ' timeout')) } }, 8000)
     ch.subscribe((status, err) => {
-      console.log(`[pulse] ${label} status:`, status, err || '')
       if (status === 'SUBSCRIBED') {
         clearTimeout(timer)
         if (!settled) { settled = true; resolve() }
@@ -81,8 +79,7 @@ function open() {
       live = true
       retries = 0
       handlers.onStatus?.('connected')
-      const res = await presenceCh.track({ name: myName, user_id: me })
-      console.log('[pulse] track result:', res)
+      await presenceCh.track({ name: myName, user_id: me, ready: myReady })
       startPresencePoll()
     })
 }
@@ -99,19 +96,17 @@ function scheduleReconnect() {
   live = false
   handlers.onStatus?.('reconnecting')
   retries++
-  console.warn('[pulse] scheduling reconnect, attempt', retries)
   const wait = Math.min(10000, 500 * 2 ** retries)
   setTimeout(async () => {
     if (!topic) return
     await removeStale()
-    try { await open() } catch (e) { console.error('[pulse] reconnect failed:', e); scheduleReconnect() }
+    try { await open() } catch { scheduleReconnect() }
   }, wait)
 }
 
 function send(e) {
-  if (!bcastCh || !live) { console.warn('[pulse] send skipped, not live'); return Promise.resolve() }
+  if (!bcastCh || !live) return Promise.resolve()
   return bcastCh.send({ type: 'broadcast', event: 'e', payload: { ...e, from: me, name: myName } })
-    .then(r => console.log('[pulse] send result:', r))
 }
 
 export const sendPlay    = at            => send({ t: 'play', at, sentAt: Date.now() })
@@ -119,6 +114,14 @@ export const sendPause   = at            => send({ t: 'pause', at })
 export const sendChat    = text          => send({ t: 'chat', text })
 export const sendSyncReq = (hash, at)    => send({ t: 'sync_req', hash, at })
 export const sendSyncRes = (to, ok, off) => send({ t: 'sync_res', to, ok, offset: off })
+export const sendReaction = emoji        => send({ t: 'reaction', emoji })
+export const sendPosReq  = ()            => send({ t: 'pos_req' })
+export const sendPosRes  = (to, at, playing) => send({ t: 'pos_res', to, at, playing, sentAt: Date.now() })
+
+export async function setReady(ready) {
+  myReady = ready
+  if (presenceCh && live) { try { await presenceCh.track({ name: myName, user_id: me, ready: myReady }) } catch {} }
+}
 
 export function myId() { return me }
 
@@ -137,13 +140,9 @@ function startPresencePoll() {
   pollTimer = setInterval(() => {
     if (!presenceCh) return
     const state = presenceCh.presenceState() || {}
-    const names = Object.values(state).flat().map(m => m.name || '?')
-    const key = names.slice().sort().join(',')
-    if (key !== last) {
-      last = key
-      console.log('[pulse] presence poll:', names)
-      handlers.onMembers?.(names)
-    }
+    const members = Object.values(state).flat().map(m => ({ name: m.name || '?', ready: !!m.ready }))
+    const key = members.map(m => m.name + (m.ready ? '1' : '0')).sort().join(',')
+    if (key !== last) { last = key; handlers.onMembers?.(members) }
   }, 1200)
 }
 function stopPresencePoll() {
@@ -151,7 +150,6 @@ function stopPresencePoll() {
   pollTimer = null
 }
 
-// debug helper — open console and type: pulseDebug.state()
 window.pulseDebug = {
   state: () => ({ presence: presenceCh?.state, broadcast: bcastCh?.state, live, topic }),
   members: () => presenceCh?.presenceState(),

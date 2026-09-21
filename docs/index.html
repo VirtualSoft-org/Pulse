@@ -12,7 +12,6 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
 
-  /* ---- splash ---- */
   #splash { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 50; }
   #splash form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px; width: 300px; display: flex; flex-direction: column; gap: 12px; }
   #splash h1 { margin: 0 0 4px; font-size: 20px; display: flex; align-items: center; gap: 8px; }
@@ -23,7 +22,6 @@
   #splash button:hover { background: var(--accent2); color: #fff; }
   #splashErr { color: var(--bad); font-size: 13px; min-height: 16px; }
 
-  /* ---- app shell ---- */
   #app { display: none; height: 100vh; flex-direction: column; }
   #app.show { display: flex; }
   #topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -33,12 +31,17 @@
   .pill.connected .dot { background: var(--ok); }
   .pill.reconnecting .dot { background: var(--warn); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
+
+  #readyBtn { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-radius: 20px; background: var(--panel2); border: 1px solid var(--line); color: var(--dim); cursor: pointer; }
+  #readyBtn.on { background: rgba(61,220,132,.15); border-color: var(--ok); color: var(--ok); }
+
   #members { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
-  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .avatar.ready::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
 
   #layout { flex: 1; display: flex; min-height: 0; }
   #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
-  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; }
+  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; }
   video { width: 100%; height: 100%; border-radius: 10px; background: #000; }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
@@ -48,6 +51,13 @@
   .btn:hover { border-color: var(--accent); }
   .btn.busy { color: var(--warn); }
   #toast { font-size: 12px; color: var(--dim); }
+
+  #reactions { display: flex; gap: 4px; }
+  #reactions button { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 16px; cursor: pointer; line-height: 1; }
+  #reactions button:hover { border-color: var(--accent); transform: scale(1.1); }
+
+  .reaction-pop { position: absolute; font-size: 28px; pointer-events: none; animation: floatUp 1.6s ease-out forwards; }
+  @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(0.8); } 20% { transform: translateY(-10px) scale(1.1); } 100% { opacity: 0; transform: translateY(-90px) scale(1); } }
 
   #side { width: 280px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
   #chat { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -82,6 +92,7 @@
   <div id="topbar">
     <b id="roomLabel"></b>
     <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
+    <button id="readyBtn">○ Not ready</button>
     <div id="members"></div>
   </div>
 
@@ -97,6 +108,14 @@
       <div class="bar">
         <button class="btn" id="sync">🔄 One-time Sync</button>
         <button class="btn" id="restart">⏮ Restart from 0</button>
+        <div id="reactions">
+          <button data-e="👍">👍</button>
+          <button data-e="😂">😂</button>
+          <button data-e="😮">😮</button>
+          <button data-e="❤️">❤️</button>
+          <button data-e="😭">😭</button>
+          <button data-e="🔥">🔥</button>
+        </div>
         <span id="toast"></span>
       </div>
       <input id="file" type="file" accept="video/*" style="display:none">
@@ -113,14 +132,14 @@
 </div>
 
 <script type="module">
-import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes } from './pulse.js'
+import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady } from './pulse.js'
 import { hashFrame, findOffset } from './fingerprint.js'
 
 const $ = id => document.getElementById(id)
-const v = $('v'), chat = $('chat'), toast = $('toast')
+const v = $('v'), chat = $('chat'), toast = $('toast'), dropzone = $('dropzone')
 let offset = 0, applying = false, connected = false, fileKey = null
+let iAmReady = false, snapped = false
 
-// ---------- persistence ----------
 const remembered = {
   room: localStorage.getItem('pulse.room') || '',
   nick: localStorage.getItem('pulse.nick') || '',
@@ -136,7 +155,6 @@ function savePos() {
 }
 setInterval(savePos, 4000)
 
-// ---------- chat/system log ----------
 function bubble(name, text, mine) {
   chat.insertAdjacentHTML('beforeend',
     `<div class="msg ${mine ? 'me' : ''}"><div class="who">${mine ? 'you' : name}</div>${text}</div>`)
@@ -151,15 +169,12 @@ function say(text, ms = 4000) {
   clearTimeout(say._t)
   say._t = setTimeout(() => { if (toast.textContent === text) toast.textContent = '' }, ms)
 }
-
-// ---------- status pill ----------
 function setStatus(state) {
   const pill = $('status')
   pill.className = 'pill ' + state
   $('statusText').textContent = { connected: 'live', reconnecting: 'reconnecting…' }[state] || state
 }
 
-// ---------- file loading ----------
 function loadFile(f) {
   if (!f) return
   v.src = URL.createObjectURL(f)
@@ -168,6 +183,7 @@ function loadFile(f) {
     const saved = parseFloat(localStorage.getItem(fileKey))
     if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
     v.onloadedmetadata = null
+    if (connected) { snapped = false; sendPosReq() }
   }
   $('hint').style.display = 'none'
 }
@@ -175,10 +191,9 @@ function fmt(s) { return new Date(s * 1000).toISOString().substr(11, 8) }
 
 $('pickFile').onclick = () => $('file').click()
 $('file').onchange = e => loadFile(e.target.files[0])
-;['dragover', 'drop'].forEach(ev => $('dropzone').addEventListener(ev, e => e.preventDefault()))
-$('dropzone').addEventListener('drop', e => loadFile(e.dataTransfer.files[0]))
+;['dragover', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => e.preventDefault()))
+dropzone.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]))
 
-// ---------- join ----------
 $('joinForm').onsubmit = async e => {
   e.preventDefault()
   const room = $('room').value.trim(), nick = $('nick').value.trim(), pass = $('pass').value.trim()
@@ -189,22 +204,30 @@ $('joinForm').onsubmit = async e => {
   try {
     await connect(room, nick, pass, {
       onEvent,
-      onMembers: names => {
-        $('members').innerHTML = names.map(n =>
-          `<div class="avatar" title="${n}">${n.slice(0, 2).toUpperCase()}</div>`).join('')
+      onMembers: members => {
+        $('members').innerHTML = members.map(m =>
+          `<div class="avatar ${m.ready ? 'ready' : ''}" title="${m.name}${m.ready ? ' (ready)' : ''}">${m.name.slice(0, 2).toUpperCase()}</div>`).join('')
       },
       onStatus: setStatus,
     })
     connected = true
     $('roomLabel').textContent = room
-    $('splash').style.display = 'none'
-    $('app').classList.add('show')
+    document.getElementById('splash').style.display = 'none'
+    document.getElementById('app').classList.add('show')
+    snapped = false
+    sendPosReq()   // late-join snap
   } catch (err) {
     $('splashErr').textContent = 'Could not connect: ' + err.message
   }
 }
 
-// ---------- sync protocol ----------
+$('readyBtn').onclick = () => {
+  iAmReady = !iAmReady
+  $('readyBtn').classList.toggle('on', iAmReady)
+  $('readyBtn').textContent = iAmReady ? '● Ready' : '○ Not ready'
+  setReady(iAmReady)
+}
+
 function onEvent(e) {
   if (e.t === 'chat') return bubble(e.name, escapeHtml(e.text), false)
 
@@ -226,6 +249,21 @@ function onEvent(e) {
   }
   if (e.t === 'sync_req') runSync(e)
   if (e.t === 'sync_res') sys(e.ok ? `${e.name} synced (${e.offset.toFixed(2)}s offset)` : `${e.name} couldn't find a match`)
+  if (e.t === 'reaction') spawnReaction(e.emoji, e.name)
+
+  // late-join snap protocol
+  if (e.t === 'pos_req') {
+    if (v.duration) sendPosRes(e.from, v.currentTime - offset, !v.paused)
+  }
+  if (e.t === 'pos_res') {
+    if (snapped || !v.duration) return
+    snapped = true
+    const lag = e.playing ? Math.min(2, Math.max(0, (Date.now() - e.sentAt) / 1000)) : 0
+    const target = e.at + offset + lag
+    v.currentTime = target
+    if (e.playing) { applying = true; v.play().catch(() => {}).finally(() => setTimeout(() => applying = false, 250)) }
+    say(`Jumped to ${e.name}'s position`)
+  }
 }
 
 async function runSync(e) {
@@ -237,6 +275,26 @@ async function runSync(e) {
   btn.classList.remove('busy'); btn.textContent = '🔄 One-time Sync'
   sendSyncRes(e.from, r.ok, offset)
 }
+
+function spawnReaction(emoji, name) {
+  const el = document.createElement('div')
+  el.className = 'reaction-pop'
+  el.textContent = emoji
+  el.style.left = (20 + Math.random() * 60) + '%'
+  el.style.bottom = '10%'
+  dropzone.appendChild(el)
+  setTimeout(() => el.remove(), 1700)
+  sys(`${name} reacted ${emoji}`)
+}
+
+document.querySelectorAll('#reactions button').forEach(btn => {
+  btn.onclick = () => {
+    if (!connected) return
+    const emoji = btn.dataset.e
+    sendReaction(emoji)
+    spawnReaction(emoji, 'you')
+  }
+})
 
 v.addEventListener('play',  () => { if (connected && !applying) sendPlay(v.currentTime - offset) })
 v.addEventListener('pause', () => { if (connected && !applying) sendPause(v.currentTime - offset) })
