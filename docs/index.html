@@ -48,6 +48,12 @@
   .avatar { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--accent2); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
   .avatar.ready::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
   .avatar.host { box-shadow: 0 0 0 2px var(--warn); }
+  .avatar img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover; border-radius: 50%;
+    display: block;
+  }
 
   .host-picker {
     position: absolute;
@@ -395,6 +401,7 @@
     <input id="room" placeholder="room name" required>
     <input id="nick" placeholder="your name" required>
     <input id="pass" placeholder="passphrase (share with friends)">
+    <input id="avatar" placeholder="avatar image URL (optional)">
     <button type="submit" id="joinBtn"><span>Join room</span></button>
     <div id="splashProg"></div>
     <div id="splashErr"></div>
@@ -469,10 +476,21 @@ const remembered = {
   room: localStorage.getItem('pulse.room') || '',
   nick: localStorage.getItem('pulse.nick') || '',
   pass: localStorage.getItem('pulse.pass') || '',
+  avatar: localStorage.getItem('pulse.avatar') || '',
 }
 $('room').value = remembered.room
 $('nick').value = remembered.nick
 $('pass').value = remembered.pass
+$('avatar').value = remembered.avatar
+
+// Accept only http(s) and data:image — blocks javascript:, file:, etc.
+function safeAvatarUrl(url) {
+  if (!url) return ''
+  const s = String(url).trim()
+  if (/^https?:\/\//i.test(s)) return s
+  if (/^data:image\//i.test(s)) return s
+  return ''
+}
 
 function savePos() {
   if (!fileKey || !v.duration) return
@@ -711,7 +729,16 @@ function renderMembers(members) {
   if (members) lastMembers = members
   $('members').innerHTML = lastMembers.map(m => {
     const isHost = m.user_id && m.user_id === hostId
-    return `<div class="avatar ${m.ready ? 'ready' : ''} ${isHost ? 'host' : ''}" title="${m.name}${m.ready ? ' (ready)' : ''}${isHost ? ' · host' : ''}">${m.name.slice(0, 2).toUpperCase()}</div>`
+    const name = String(m.name || '?')
+    const initial = name.slice(0, 2).toUpperCase()
+    const safe = escapeHtml(name)
+    const tip = `${safe}${m.ready ? ' (ready)' : ''}${isHost ? ' · host' : ''}`
+    // Sanitize avatar from other clients too.
+    const avatar = safeAvatarUrl(m.avatar || '')
+    const img = avatar
+      ? `<img src="${escapeHtml(avatar)}" alt="" loading="lazy" onerror="this.remove()">`
+      : ''
+    return `<div class="avatar ${m.ready ? 'ready' : ''} ${isHost ? 'host' : ''}" title="${tip}">${initial}${img}</div>`
   }).join('')
 }
 
@@ -827,9 +854,11 @@ $('joinForm').onsubmit = async e => {
   if (btn.disabled) return
 
   const room = $('room').value.trim(), nick = $('nick').value.trim(), pass = $('pass').value.trim()
+  const avatar = safeAvatarUrl($('avatar').value)
   localStorage.setItem('pulse.room', room)
   localStorage.setItem('pulse.nick', nick)
   localStorage.setItem('pulse.pass', pass)
+  localStorage.setItem('pulse.avatar', avatar)
 
   $('splashErr').textContent = ''
   $('splashProg').textContent = ''
@@ -843,7 +872,7 @@ $('joinForm').onsubmit = async e => {
       onHost: setHost,
       onStatus: setStatus,
       onProgress: msg => { $('splashProg').textContent = msg },
-    })
+    }, avatar)
     connected = true
     $('roomLabel').textContent = room
     document.getElementById('splash').style.display = 'none'

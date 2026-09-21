@@ -20,6 +20,7 @@ let tabId = null           // per-tab identity (sessionStorage) — our real "me
 let myName = 'guest'
 let myReady = false
 let myJoinedAt = 0
+let myAvatar = ''
 let topic = null
 let live = false
 let retries = 0
@@ -78,7 +79,7 @@ function retrack() {
   }
   console.log('[pulse] retrack sending…', { name: myName, tabId })
   return ch.track({
-    name: myName, ready: myReady, joinedAt: myJoinedAt,
+    name: myName, ready: myReady, joinedAt: myJoinedAt, avatar: myAvatar,
     hostHint: manualHostId, hostHintAt: manualHostAt,
   }).then(r => {
     console.log('[pulse] track result:', r)
@@ -92,7 +93,7 @@ function retrack() {
 function emitMembers() {
   if (tabId) {
     memberMap.set(tabId, {
-      name: myName, ready: myReady, joinedAt: myJoinedAt,
+      name: myName, ready: myReady, joinedAt: myJoinedAt, avatar: myAvatar,
       hostHint: manualHostId, hostHintAt: manualHostAt,
       lastSeen: Date.now(),
     })
@@ -107,6 +108,7 @@ function emitMembers() {
           name: (p && p.name) || '?',
           ready: !!(p && p.ready),
           joinedAt: (p && p.joinedAt) || 0,
+          avatar: (p && p.avatar) || '',
           hostHint: (p && p.hostHint) || null,
           hostHintAt: (p && p.hostHintAt) || 0,
           lastSeen: Date.now(),
@@ -124,6 +126,7 @@ function emitMembers() {
 
   const members = [...memberMap.entries()].map(([uid, m]) => ({
     user_id: uid, name: m.name, ready: m.ready, joinedAt: m.joinedAt,
+    avatar: m.avatar || '',
     hostHint: m.hostHint || null, hostHintAt: m.hostHintAt || 0,
   }))
 
@@ -140,7 +143,7 @@ function stopPoll() {
   pollTimer = null
 }
 
-export async function connect(roomId, displayName, passphrase, h = {}) {
+export async function connect(roomId, displayName, passphrase, h = {}, avatar = '') {
   handlers = h
   await disconnect()
 
@@ -156,6 +159,7 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
   myName = displayName || 'guest'
   myReady = false
   myJoinedAt = Date.now()
+  myAvatar = avatar || ''
   topic = topicFor(roomId, passphrase)
   retries = 0
   live = false
