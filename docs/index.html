@@ -78,14 +78,33 @@
     white-space: nowrap;
   }
   .host-pick:hover { background: var(--panel2); }
-  #dropzone { flex: 1; background: #000; border-radius: 10px; position: relative; min-height: 0; overflow: hidden; }
-  /* On mobile the video's native aspect ratio is applied via JS after load.
-     Until then, default to 16/9 to avoid layout jumps. */
-  @media (max-width: 720px) { #dropzone { aspect-ratio: 16/9; max-height: 60vh; } }
+  #dropzone {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    background: #000;
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Mobile: fixed 16:9 box, capped so it can't push the layout around.
+     Vertical and ultra-wide videos letterbox inside via object-fit: contain. */
+  @media (max-width: 720px) {
+    #dropzone { aspect-ratio: 16 / 9; max-height: 50vh; }
+  }
   #layout { flex: 1; display: flex; min-height: 0; }
-  #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
+  #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; min-height: 0; }
 
-  video { width: 100%; height: 100%; border-radius: 10px; background: #000; object-fit: contain; }
+  video {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    border-radius: 10px;
+    background: #000;
+    object-fit: contain;
+  }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
 
@@ -98,7 +117,14 @@
     background: var(--panel);
     border-top: 1px solid var(--line);
     flex-shrink: 0;
+    transition: opacity .25s ease, transform .25s ease;
   }
+  #dropzone.pc-hidden #playerControls {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+  }
+  #dropzone.pc-hidden { cursor: none; }
   .pc-btn {
     background: transparent; border: 0; color: var(--text);
     cursor: pointer; padding: 4px 6px; border-radius: 6px;
@@ -773,9 +799,6 @@ function loadFile(f) {
   v.onloadedmetadata = () => {
     const saved = parseFloat(localStorage.getItem(fileKey))
     if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
-    if (v.videoWidth && v.videoHeight) {
-      dropzone.style.aspectRatio = `${v.videoWidth} / ${v.videoHeight}`
-    }
     v.onloadedmetadata = null
     if (connected) { snapped = false; sendPosReq() }
     handleOrientationChange()
@@ -1031,6 +1054,43 @@ v.addEventListener('volumechange', updatePcMute)
 document.addEventListener('fullscreenchange', () => {
   const b = $('pcFs'); if (b) b.textContent = document.fullscreenElement ? '⤡' : '⛶'
 })
+
+// Auto-hide the control bar after 2.5s of no interaction while playing.
+const HIDE_DELAY = 2500
+let hideTimer = null
+let overControls = false
+
+function showControls() {
+  dropzone.classList.remove('pc-hidden')
+  clearTimeout(hideTimer)
+  if (!v.paused) {
+    hideTimer = setTimeout(() => {
+      if (!overControls && !v.paused) dropzone.classList.add('pc-hidden')
+    }, HIDE_DELAY)
+  }
+}
+
+function hideControlsNow() {
+  clearTimeout(hideTimer)
+  if (!v.paused && !overControls) dropzone.classList.add('pc-hidden')
+}
+
+dropzone.addEventListener('mousemove', showControls)
+dropzone.addEventListener('touchstart', showControls, { passive: true })
+dropzone.addEventListener('pointerdown', showControls)
+
+$('playerControls').addEventListener('mouseenter', () => { overControls = true; showControls() })
+$('playerControls').addEventListener('mouseleave', () => { overControls = false; showControls() })
+
+v.addEventListener('play', () => { showControls() })
+v.addEventListener('pause', () => { dropzone.classList.remove('pc-hidden'); clearTimeout(hideTimer) })
+v.addEventListener('ended', () => { dropzone.classList.remove('pc-hidden'); clearTimeout(hideTimer) })
+
+// Press any key during playback → reveal controls briefly.
+window.addEventListener('keydown', showControls)
+
+// Hide on initial state (before a file is loaded, keep controls visible).
+// Only hides once the user is actually playing.
 
 // Keyboard: space = play/pause, F = fullscreen (host only)
 window.addEventListener('keydown', e => {
