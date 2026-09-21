@@ -75,47 +75,66 @@ export async function connect(roomId, displayName, passphrase, h = {}) {
 }
 
 function open() {
-  presenceCh = sb.channel(`pulse:p:${topic}`, { config: { presence: { key: me } } })
-  bcastCh = sb.channel(`pulse:b:${topic}`, { config: { broadcast: { self: false } } })
+  const ch = sb.channel(`pulse:${topic}`, {
+    config: {
+      presence: { key: me },
+      broadcast: { self: false }
+    }
+  })
+  presenceCh = ch
+  bcastCh = ch
 
-  presenceCh.on('presence', { event: 'sync' }, () => {
+  ch.on('presence', { event: 'sync' }, () => {
+    console.log('[pulse] presence sync')
     emitMembers()
   })
+  ch.on('presence', { event: 'join' }, ({ key, newPresences }) => {
+    console.log('[pulse] presence join:', key, newPresences)
+  })
+  ch.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+    console.log('[pulse] presence leave:', key, leftPresences)
+  })
 
-  bcastCh.on('broadcast', { event: 'e' }, ({ payload }) => {
+  ch.on('broadcast', { event: 'e' }, ({ payload }) => {
     if (!payload || payload.from === me) return
     if (payload.to && payload.to !== me) return
     handlers.onEvent?.(payload)
   })
 
-  const subscribeOne = (ch, label) => new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     let settled = false
-    const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error(label + ' timeout')) } }, 8000)
-    ch.subscribe((status, err) => {
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error('subscribe timeout')) }
+    }, 8000)
+
+    ch.subscribe(async (status, err) => {
       if (status === 'SUBSCRIBED') {
         clearTimeout(timer)
-        if (!settled) { settled = true; resolve() }
+        if (settled) return
+        settled = true
+        try {
+          await ch.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt })
+          console.log('[pulse] tracked presence as', me)
+        } catch (e) {
+          console.error('[pulse] track failed', e)
+        }
+        resolve()
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         clearTimeout(timer)
         if (!settled) { settled = true; reject(err || new Error(status)) }
         else if (live) scheduleReconnect()
       }
     })
+  }).then(() => {
+    live = true
+    retries = 0
+    handlers.onStatus?.('connected')
+    startPresencePoll()
   })
-
-  return Promise.all([subscribeOne(presenceCh, 'presence'), subscribeOne(bcastCh, 'broadcast')])
-    .then(async () => {
-      live = true
-      retries = 0
-      handlers.onStatus?.('connected')
-      await presenceCh.track({ name: myName, user_id: me, ready: myReady, joinedAt: myJoinedAt })
-      startPresencePoll()
-    })
 }
 
 async function removeStale() {
   if (presenceCh) { try { await sb.removeChannel(presenceCh) } catch {} }
-  if (bcastCh) { try { await sb.removeChannel(bcastCh) } catch {} }
   presenceCh = null
   bcastCh = null
 }
