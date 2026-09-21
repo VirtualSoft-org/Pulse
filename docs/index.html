@@ -2,7 +2,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse</title>
-<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
 <style>
   :root {
     --bg: #0b0d12; --panel: #12151c; --panel2: #191d27; --line: #262b36;
@@ -55,20 +54,78 @@
   @media (max-width: 720px) { #dropzone { aspect-ratio: 16/9; max-height: 60vh; } }
   #layout { flex: 1; display: flex; min-height: 0; }
   #main { flex: 1; display: flex; flex-direction: column; padding: 14px; gap: 10px; min-width: 0; }
-  /* Non-host: block play/pause/seek, keep volume / fullscreen / settings / PiP */
-  #dropzone.locked .plyr__control--overlaid,
-  #dropzone.locked .plyr__control--play,
-  #dropzone.locked .plyr__progress,
-  #dropzone.locked .plyr__video-wrapper,
-  #dropzone.locked .plyr__poster {
-    pointer-events: none !important;
-  }
-  #dropzone.locked .plyr__control--overlaid,
-  #dropzone.locked .plyr__control--play { opacity: .35; }
 
   video { width: 100%; height: 100%; border-radius: 10px; background: #000; object-fit: contain; }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+
+  /* Custom player control bar */
+  #dropzone { display: flex; flex-direction: column; }
+  #dropzone video { flex: 1; min-height: 0; }
+  #playerControls {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .pc-btn {
+    background: transparent; border: 0; color: var(--text);
+    cursor: pointer; padding: 4px 6px; border-radius: 6px;
+    font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    min-width: 32px; height: 32px; flex-shrink: 0;
+  }
+  .pc-btn:hover:not(:disabled) { background: var(--panel2); }
+  .pc-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .pc-seek {
+    flex: 1; min-width: 0; height: 4px; cursor: pointer;
+    -webkit-appearance: none; appearance: none;
+    background: var(--line); border-radius: 2px; outline: none;
+    accent-color: var(--accent);
+  }
+  .pc-seek::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--accent); cursor: pointer; border: 0;
+  }
+  .pc-seek::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 0;
+  }
+  .pc-seek:disabled { cursor: not-allowed; opacity: .35; }
+  .pc-seek:disabled::-webkit-slider-thumb { background: var(--dim); }
+  .pc-seek:disabled::-moz-range-thumb { background: var(--dim); }
+  .pc-time {
+    font-size: 12px; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; flex-shrink: 0;
+    min-width: 88px; text-align: center;
+  }
+  .pc-vol {
+    width: 70px; height: 4px; cursor: pointer; flex-shrink: 0;
+    -webkit-appearance: none; appearance: none;
+    background: var(--line); border-radius: 2px; outline: none;
+    accent-color: var(--accent);
+  }
+  .pc-vol::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--accent); cursor: pointer; border: 0;
+  }
+  .pc-vol::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 0;
+  }
+
+  /* Non-host: block play + seek only */
+  #dropzone.locked #pcPlay,
+  #dropzone.locked #pcSeek { opacity: .35; pointer-events: none; }
+
+  @media (max-width: 720px) {
+    #playerControls { padding: 6px 8px; gap: 6px; }
+    .pc-vol { width: 50px; }
+    .pc-time { font-size: 11px; min-width: 74px; }
+    .pc-btn { min-width: 28px; height: 28px; font-size: 14px; }
+  }
 
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .btn { background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
@@ -300,10 +357,18 @@
   <div id="layout">
     <div id="main">
       <div id="dropzone">
-        <video id="v" controls></video>
+        <video id="v" playsinline preload="metadata"></video>
         <div id="hint">
           <span>Drop your local video file here</span>
           <button id="pickFile">Choose file…</button>
+        </div>
+        <div id="playerControls">
+          <button class="pc-btn" id="pcPlay" aria-label="Play">▶</button>
+          <input class="pc-seek" id="pcSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+          <span class="pc-time" id="pcTime">0:00 / 0:00</span>
+          <button class="pc-btn" id="pcMute" aria-label="Mute">🔊</button>
+          <input class="pc-vol" id="pcVol" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume">
+          <button class="pc-btn" id="pcFs" aria-label="Fullscreen">⛶</button>
         </div>
       </div>
       <div class="bar">
@@ -332,7 +397,6 @@
   </div>
 </div>
 
-<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
 <script type="module">
 import { connect, sendPlay, sendPause, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId } from './pulse.js'
 import { hashFrame, findOffset } from './fingerprint.js'
@@ -340,17 +404,6 @@ import { hashFrame, findOffset } from './fingerprint.js'
 const $ = id => document.getElementById(id)
 const v = $('v'), chat = $('chat'), toast = $('toast'), dropzone = $('dropzone')
 
-const player = new Plyr(v, {
-  controls: ['play-large', 'play', 'progress', 'current-time', 'duration',
-             'mute', 'volume', 'settings', 'pip', 'fullscreen'],
-  settings: ['speed'],
-  speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-  keyboard: { focused: true, global: false },
-  tooltips: { controls: true, seek: true },
-  seekTime: 10,
-  invertTime: false,
-  hideControls: true,
-})
 let offset = 0, applying = false, connected = false, fileKey = null
 let iAmReady = false, snapped = false
 let hostId = null, lastMembers = []
@@ -530,7 +583,7 @@ function ensureFsChat() {
       sendChat(text)
       bubble('', escapeHtml(text), true)
       input.value = ''
-      // Keep input open so the user can send another message; keyboard stays up.
+      close()
     } else if (e.key === 'Escape') {
       e.preventDefault()
       close()
@@ -569,12 +622,12 @@ async function handleOrientationChange() {
   if (!isMobileDevice()) return
   if (!$('app').classList.contains('show')) return
   if (!v.src) return
-  if (!player.fullscreen.enabled) return
+  if (!dropzone.requestFullscreen) return
   try {
-    if (isLandscape() && !player.fullscreen.active) {
-      await player.fullscreen.enter()
-    } else if (!isLandscape() && player.fullscreen.active) {
-      await player.fullscreen.exit()
+    if (isLandscape() && !document.fullscreenElement) {
+      await dropzone.requestFullscreen()
+    } else if (!isLandscape() && document.fullscreenElement) {
+      await document.exitFullscreen()
     }
   } catch (e) {
     console.debug('[pulse] auto-fullscreen blocked:', e && e.message)
@@ -626,6 +679,9 @@ function applyHostLock() {
   dropzone.classList.toggle('locked', !mine)
   $('sync').disabled = !mine
   $('restart').disabled = !mine
+  const p = $('pcPlay'), s = $('pcSeek')
+  if (p) p.disabled = !mine
+  if (s) s.disabled = !mine
 }
 
 function setStatus(state) {
@@ -781,27 +837,116 @@ document.querySelectorAll('#reactions button').forEach(btn => {
   }
 })
 
-let roomPlaying = false
-
 function enforceRoomState() {
-  if (applying) return
   if (!hostId || hostId === myId()) return
-  applying = true
-  if (roomPlaying && v.paused) v.play().catch(() => {})
-  else if (!roomPlaying && !v.paused) v.pause()
-  setTimeout(() => { applying = false }, 250)
+  const attempt = () => {
+    applying = true
+    if (roomPlaying && v.paused) v.play().catch(() => {})
+    else if (!roomPlaying && !v.paused) v.pause()
+    setTimeout(() => { applying = false }, 250)
+  }
+  attempt()
+  setTimeout(attempt, 400)   // second chance in case the first was ignored
 }
 
 v.addEventListener('play', () => {
+  updatePcPlay()
   if (applying) return
   if (hostId && hostId !== myId()) { enforceRoomState(); return }
   if (connected) sendPlay(v.currentTime - offset)
 })
 v.addEventListener('pause', () => {
+  updatePcPlay()
   if (applying) return
   if (hostId && hostId !== myId()) { enforceRoomState(); return }
   if (connected) sendPause(v.currentTime - offset)
 })
+
+// Custom player controls -----------------------------------------------------
+function fmtTime(s) {
+  if (!isFinite(s) || s < 0) s = 0
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+    : `${m}:${String(sec).padStart(2,'0')}`
+}
+
+function updatePcPlay() {
+  const b = $('pcPlay'); if (!b) return
+  b.textContent = v.paused ? '▶' : '⏸'
+  b.setAttribute('aria-label', v.paused ? 'Play' : 'Pause')
+}
+
+function updatePcTime() {
+  const el = $('pcTime'); if (!el) return
+  el.textContent = `${fmtTime(v.currentTime)} / ${fmtTime(v.duration)}`
+}
+
+function updatePcSeek() {
+  const s = $('pcSeek'); if (!s || s.matches(':active')) return
+  const d = v.duration || 0
+  s.value = d ? String(Math.round((v.currentTime / d) * 1000)) : '0'
+}
+
+function updatePcMute() {
+  const b = $('pcMute'); if (!b) return
+  const muted = v.muted || v.volume === 0
+  b.textContent = muted ? '🔇' : '🔊'
+  b.setAttribute('aria-label', muted ? 'Unmute' : 'Mute')
+}
+
+$('pcPlay').onclick = () => {
+  if (hostId && hostId !== myId()) return
+  if (v.paused) v.play().catch(() => {})
+  else v.pause()
+}
+$('pcMute').onclick = () => {
+  v.muted = !v.muted
+  if (!v.muted && v.volume === 0) v.volume = 1
+  $('pcVol').value = String(v.muted ? 0 : v.volume)
+  updatePcMute()
+}
+$('pcVol').oninput = e => {
+  const val = parseFloat(e.target.value)
+  v.volume = val
+  v.muted = val === 0
+  updatePcMute()
+}
+$('pcSeek').oninput = e => {
+  if (hostId && hostId !== myId()) return
+  const d = v.duration || 0
+  if (!d) return
+  v.currentTime = (parseFloat(e.target.value) / 1000) * d
+}
+$('pcFs').onclick = async () => {
+  try {
+    if (!document.fullscreenElement) await dropzone.requestFullscreen()
+    else await document.exitFullscreen()
+  } catch (err) {
+    console.debug('[pulse] fullscreen failed:', err && err.message)
+  }
+}
+
+v.addEventListener('timeupdate', () => { updatePcSeek(); updatePcTime() })
+v.addEventListener('loadedmetadata', () => { updatePcTime(); updatePcSeek() })
+v.addEventListener('volumechange', updatePcMute)
+document.addEventListener('fullscreenchange', () => {
+  const b = $('pcFs'); if (b) b.textContent = document.fullscreenElement ? '⤡' : '⛶'
+})
+
+// Keyboard: space = play/pause, F = fullscreen (host only)
+window.addEventListener('keydown', e => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return
+  if (e.key === ' ' && !e.repeat) {
+    e.preventDefault()
+    $('pcPlay').click()
+  } else if (e.key === 'f' || e.key === 'F') {
+    e.preventDefault()
+    $('pcFs').click()
+  }
+})
+
+updatePcPlay(); updatePcMute(); updatePcTime()
 
 $('sync').onclick = () => {
   if (hostId && hostId !== myId()) return say('Only the host can sync')
