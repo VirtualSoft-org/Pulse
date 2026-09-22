@@ -63,6 +63,18 @@
   #shareBtn:hover { color: var(--text); border-color: var(--accent); }
   #shareBtn.copied { color: var(--ok); border-color: var(--ok); }
 
+  #resetBtn {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; padding: 0; width: 30px; height: 30px;
+    border-radius: 50%;
+    background: transparent; border: 1px solid var(--line);
+    color: var(--dim); cursor: pointer; font-family: inherit;
+    flex-shrink: 0; line-height: 1;
+    transition: color .12s ease, border-color .12s ease;
+  }
+  #resetBtn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  #resetBtn:disabled { opacity: .35; cursor: not-allowed; }
+
   #leaveBtn {
     display: flex; align-items: center; justify-content: center;
     font-size: 12px; padding: 0; width: 30px; height: 30px;
@@ -251,6 +263,48 @@
   }
   #hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--dim); font-size: 14px; pointer-events: none; }
   #hint button { pointer-events: auto; background: var(--panel2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+
+  /* Video load state: spinner during demux, warning on failure */
+  .load-state {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px;
+    background: rgba(0,0,0,.72);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    z-index: 15;
+    padding: 24px;
+    text-align: center;
+  }
+  .load-state.hidden { display: none; }
+  .load-spinner {
+    width: 34px; height: 34px;
+    border: 3px solid rgba(255,255,255,.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  .load-spinner.hidden { display: none; }
+  .load-text { font-size: 13px; color: var(--dim); max-width: 420px; line-height: 1.5; }
+  .load-warn {
+    font-size: 13px; color: var(--warn);
+    background: rgba(245,197,66,.08);
+    border: 1px solid rgba(245,197,66,.3);
+    border-radius: 10px;
+    padding: 12px 16px;
+    max-width: 500px;
+    line-height: 1.5;
+    text-align: left;
+  }
+  .load-warn.hidden { display: none; }
+  .load-dismiss {
+    background: var(--panel2); border: 1px solid var(--line);
+    color: var(--text); padding: 7px 16px;
+    border-radius: 8px; cursor: pointer; font-size: 12px;
+    font-family: inherit;
+  }
+  .load-dismiss.hidden { display: none; }
 
   /* Custom player control bar */
   #dropzone { display: flex; flex-direction: column; }
@@ -681,6 +735,7 @@
   <div id="topbar">
     <b id="roomLabel"></b>
     <button id="shareBtn" title="Copy invite link">🔗 Invite</button>
+    <button id="resetBtn" title="Reset room (host only)">⟲</button>
     <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
     <span class="pill" id="hostPill" style="position:relative">👑 <span id="hostText">…</span><div id="hostPicker" class="host-picker hidden"></div></span>
     <button id="readyBtn">○ Not ready</button>
@@ -698,6 +753,12 @@
         <div id="hint">
           <span>Drop your local video file here</span>
           <button id="pickFile">Choose file…</button>
+        </div>
+        <div id="loadState" class="load-state hidden">
+          <div id="loadSpinner" class="load-spinner"></div>
+          <div id="loadText" class="load-text"></div>
+          <div id="loadWarn" class="load-warn hidden"></div>
+          <button id="loadDismiss" class="load-dismiss hidden" type="button">Dismiss</button>
         </div>
         <div id="playerControls">
           <button class="pc-btn" id="pcPlay" aria-label="Play">▶</button>
@@ -784,7 +845,7 @@
 </div>
 
 <script type="module">
-import { connect, sendPlay, sendPause, sendSeek, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId, transferHost } from './pulse.js'
+import { connect, sendPlay, sendPause, sendSeek, sendChat, sendSyncReq, sendSyncRes, sendReaction, sendPosReq, sendPosRes, setReady, myId, transferHost, sendReset } from './pulse.js'
 import { hashFrame, findOffset } from './fingerprint.js'
 
 const $ = id => document.getElementById(id)
@@ -1197,6 +1258,7 @@ function applyHostLock() {
   dropzone.classList.toggle('locked', !mine)
   $('sync').disabled = !mine
   $('restart').disabled = !mine
+  const rb = $('resetBtn'); if (rb) rb.disabled = !mine
   const p = $('pcPlay'), s = $('pcSeek')
   if (p) p.disabled = !mine
   if (s) s.disabled = !mine
@@ -1237,10 +1299,22 @@ document.addEventListener('click', e => {
   picker.classList.add('hidden')
 })
 
+let lastStatus = 'connecting'
 function setStatus(state) {
   const pill = $('status')
   pill.className = 'pill ' + state
-  $('statusText').textContent = { connected: 'live', reconnecting: 'reconnecting…', lost: 'lost — reload page' }[state] || state
+  $('statusText').textContent = {
+    connected: 'live',
+    reconnecting: 'reconnecting…',
+    lost: 'offline — retrying…',
+  }[state] || state
+
+  // Recovered from a disconnect → re-snap to the room position.
+  if (state === 'connected' && lastStatus !== 'connected' && connected) {
+    snapped = false
+    sendPosReq()
+  }
+  lastStatus = state
 }
 
 function buildShareLink() {
@@ -1257,6 +1331,19 @@ function reflectHashInUrl() {
     r: $('room').value.trim(),
     ...($('pass').value.trim() ? { p: $('pass').value.trim() } : {}),
   }).toString()) } catch {}
+}
+
+$('resetBtn').onclick = () => {
+  if (hostId && hostId !== myId()) return say('Only the host can reset')
+  if (!confirm('Reset the room for everyone?\n\n• Clears chat\n• Resets sync offset\n• Resets playback state')) return
+  offset = 0
+  snapped = false
+  roomPlaying = false
+  chat.innerHTML = ''
+  sys('You reset the room')
+  say('Room reset')
+  sendReset()
+  applyHostLock()
 }
 
 $('shareBtn').onclick = async () => {
@@ -1279,11 +1366,96 @@ $('shareBtn').onclick = async () => {
   }
 }
 
-function loadFile(f) {
+// ── File loading with container sniffing + loading state ─────────────────────
+// Browsers can't demux MKV/AVI/WMV/FLV. Sniffing the first 4 KB lets us warn
+// before the browser wastes time and RAM trying to parse 2 GB it can't play.
+const UNSUPPORTED_CONTAINERS = new Set(['mkv', 'avi', 'wmv', 'flv'])
+let loadTimeout = null
+
+function formatBytes(n) {
+  if (!n && n !== 0) return '?'
+  if (n < 1024) return n + ' B'
+  if (n < 1024 ** 2) return (n / 1024).toFixed(1) + ' KB'
+  if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + ' MB'
+  return (n / 1024 ** 3).toFixed(2) + ' GB'
+}
+
+async function sniffContainer(file) {
+  // Read the first 4 KB — enough for every common container's magic bytes.
+  const buf = new Uint8Array(await file.slice(0, 4096).arrayBuffer())
+  const ascii = (o, n) => String.fromCharCode(...buf.slice(o, o + n))
+  const matches = (o, arr) => arr.every((b, i) => buf[o + i] === b)
+
+  // MP4 / MOV: bytes 4-7 == 'ftyp'
+  if (matches(4, [0x66, 0x74, 0x79, 0x70])) return { kind: 'mp4' }
+  // WebM / MKV: EBML magic, then 'webm' or 'matroska' in the header string
+  if (matches(0, [0x1A, 0x45, 0xDF, 0xA3])) {
+    const head = String.fromCharCode(...buf)
+    if (head.includes('webm')) return { kind: 'webm' }
+    if (head.includes('matroska')) return { kind: 'mkv' }
+    return { kind: 'ebml' }
+  }
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'AVI ') return { kind: 'avi' }
+  if (matches(0, [0x30, 0x26, 0xB2, 0x75])) return { kind: 'wmv' }
+  if (ascii(0, 3) === 'FLV') return { kind: 'flv' }
+  if (ascii(0, 4) === 'OggS') return { kind: 'ogg' }
+  return { kind: 'unknown' }
+}
+
+function showLoadState({ text, warn, dismissible = false }) {
+  const box = $('loadState')
+  box.classList.remove('hidden')
+  $('loadText').textContent = text || ''
+  const warnEl = $('loadWarn')
+  if (warn) {
+    warnEl.textContent = warn
+    warnEl.classList.remove('hidden')
+  } else {
+    warnEl.classList.add('hidden')
+  }
+  $('loadSpinner').classList.toggle('hidden', dismissible)
+  $('loadDismiss').classList.toggle('hidden', !dismissible)
+}
+
+function hideLoadState() {
+  $('loadState').classList.add('hidden')
+  clearTimeout(loadTimeout)
+  loadTimeout = null
+}
+
+$('loadDismiss').onclick = hideLoadState
+
+async function loadFile(f) {
   if (!f) return
+  hideLoadState()
+
+  const info = await sniffContainer(f).catch(() => ({ kind: 'unknown' }))
+
+  const warn = UNSUPPORTED_CONTAINERS.has(info.kind)
+    ? `This looks like a ${info.kind.toUpperCase()} file. Most browsers can't play that container natively — if it hangs, remux it to MP4 (H.264) or WebM first.`
+    : null
+
+  showLoadState({
+    text: `Loading "${f.name}" (${formatBytes(f.size)})…`,
+    warn,
+  })
+
+  // If the browser hasn't fired loadedmetadata in 30s, it's almost certainly
+  // stuck: moov-at-end MP4, unsupported codec, or a device that ran out of
+  // RAM trying to index the file.
+  loadTimeout = setTimeout(() => {
+    showLoadState({
+      text: '',
+      warn: `"${f.name}" hasn't loaded after 30 seconds. Common causes:\n• MP4 without faststart (seek index at the end of the file)\n• HEVC/H.265 codec on Firefox or older Chrome\n• A file larger than your device's free RAM\n\nTry remuxing with: ffmpeg -i "in.mp4" -c copy -movflags +faststart "out.mp4"`,
+      dismissible: true,
+    })
+  }, 30000)
+
   v.src = URL.createObjectURL(f)
   fileKey = `pulse.pos.${f.name}.${f.size}`
+
   v.onloadedmetadata = () => {
+    hideLoadState()
     const saved = parseFloat(localStorage.getItem(fileKey))
     if (saved > 5) { v.currentTime = saved; say(`Resumed at ${fmt(saved)}`) }
     v.onloadedmetadata = null
@@ -1292,6 +1464,15 @@ function loadFile(f) {
     reattachSubs()
     syncAssRect()
   }
+
+  v.onerror = () => {
+    showLoadState({
+      text: '',
+      warn: `The browser couldn't play "${f.name}". Likely causes:\n• Container isn't supported (${info.kind.toUpperCase()})\n• Codec isn't supported (HEVC/H.265 is the usual suspect on Firefox)\n• File is corrupt or truncated\n\nCheck the browser console for the specific MediaError code.`,
+      dismissible: true,
+    })
+  }
+
   $('hint').style.display = 'none'
 }
 function fmt(s) { return new Date(s * 1000).toISOString().substr(11, 8) }
@@ -1387,8 +1568,19 @@ function onEvent(e) {
     sys(`${e.name} seeked to ${fmt(target)}`)
   }
   if (e.t === 'sync_req') runSync(e)
-  if (e.t === 'sync_res') sys(e.ok ? `${e.name} synced (${e.offset.toFixed(2)}s offset)` : `${e.name} couldn't find a match`)
+  if (e.t === 'sync_res') sys(e.ok
+  ? `${e.name} synced (offset ${e.offset.toFixed(2)}s)`
+  : `${e.name} couldn't find a match — get closer, then retry`)
   if (e.t === 'reaction') spawnReaction(e.emoji, e.name)
+  if (e.t === 'reset') {
+    offset = 0
+    snapped = false
+    roomPlaying = false
+    chat.innerHTML = ''
+    sys(`${e.name} reset the room`)
+    say(`${e.name} reset the room`)
+    applyHostLock()
+  }
 
   // late-join snap protocol
   if (e.t === 'pos_req') {
@@ -1417,8 +1609,12 @@ async function runSync(e) {
   const btn = $('sync')
   btn.classList.add('busy'); btn.textContent = '🔄 Syncing…'
   const r = await findOffset(v, e.hash)
-  if (r.ok) { offset = r.localTime - e.at; say(`Synced — offset ${offset.toFixed(2)}s`) }
-  else say('No matching scene found nearby')
+  if (r.ok) {
+    offset = r.localTime - e.at
+    say(`Synced — offset ${offset.toFixed(2)}s (Δ${r.distance}/${r.max})`)
+  } else {
+    say(`No match — best Δ${r.distance}/${r.max}. Same release of the movie?`)
+  }
   btn.classList.remove('busy'); btn.textContent = '🔄 One-time Sync'
   sendSyncRes(e.from, r.ok, offset)
 }
@@ -1623,6 +1819,19 @@ window.addEventListener('keydown', e => {
 // Only active in fullscreen; ignored when the drag starts on any UI control.
 const clamp01 = (x, lo, hi) => Math.max(lo, Math.min(hi, x))
 
+// iOS Safari makes video.volume read-only; setting it is a silent no-op.
+// Detect once so the volume gesture can tell the user to use the physical
+// buttons instead of showing a fake slider that does nothing.
+const volumeWritable = (() => {
+  const old = v.volume
+  try {
+    v.volume = old === 0.5 ? 0.4 : 0.5
+    return Math.abs(v.volume - old) > 0.001
+  } finally {
+    v.volume = old
+  }
+})()
+
 let currentBrightness = 1
 function applyBrightness(val) {
   currentBrightness = val
@@ -1662,6 +1871,9 @@ function gestureAllowed(target) {
   )
 }
 
+// Time scrubbed by a full-width horizontal drag. MX Player is ~90s.
+const SEEK_FULL_SWIPE_SECONDS = 90
+
 dropzone.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button !== 0) return
   if (!gestureAllowed(e.target)) return
@@ -1669,24 +1881,54 @@ dropzone.addEventListener('pointerdown', e => {
   if (!rect.width || !rect.height) return
   const isLeft = (e.clientX - rect.left) < rect.width / 2
   gesture = {
-    kind: isLeft ? 'bright' : 'vol',
+    side: isLeft ? 'left' : 'right',
+    kind: null,                       // 'bright' | 'vol' | 'seek' — locked on first move
+    startX: e.clientX,
     startY: e.clientY,
     startBright: currentBrightness,
     startVol: v.muted ? 0 : v.volume,
+    startTime: v.currentTime,
+    rectW: rect.width,
     rectH: rect.height,
     pointerId: e.pointerId,
     moved: false,
+    seekDelta: 0,
   }
   try { dropzone.setPointerCapture(e.pointerId) } catch {}
 })
 
 dropzone.addEventListener('pointermove', e => {
   if (!gesture || e.pointerId !== gesture.pointerId) return
+  const dx = e.clientX - gesture.startX
   const dy = gesture.startY - e.clientY      // positive = swipe up
-  if (!gesture.moved && Math.abs(dy) < 8) return
-  gesture.moved = true
 
-  // Full-height swipe moves the full range.
+  // Lock the axis after the first real movement.
+  if (!gesture.moved) {
+    if (Math.hypot(dx, dy) < 10) return
+    gesture.moved = true
+    const horizontal = Math.abs(dx) > Math.abs(dy) * 1.2
+    if (horizontal) {
+      if (hostId && hostId !== myId()) { gesture = null; return }
+      gesture.kind = 'seek'
+    } else {
+      gesture.kind = gesture.side === 'left' ? 'bright' : 'vol'
+    }
+  }
+
+  if (gesture.kind === 'seek') {
+    const delta = (dx / gesture.rectW) * SEEK_FULL_SWIPE_SECONDS
+    const maxT = v.duration || 0
+    const target = Math.max(0, Math.min(maxT, gesture.startTime + delta))
+    gesture.seekDelta = target - gesture.startTime
+    const secs = Math.round(Math.abs(gesture.seekDelta))
+    showIndicator(
+      gesture.seekDelta >= 0 ? '⏩' : '⏪',
+      0.5,
+      `${gesture.seekDelta >= 0 ? '+' : '−'}${secs}s`
+    )
+    return
+  }
+
   const delta = dy / (gesture.rectH * 0.7)
 
   if (gesture.kind === 'bright') {
@@ -1694,27 +1936,39 @@ dropzone.addEventListener('pointermove', e => {
     applyBrightness(next)
     const pct = (next - 0.1) / 0.9
     showIndicator('☀️', pct, Math.round(pct * 100) + '%')
-  } else {
+  } else if (gesture.kind === 'vol') {
     const next = clamp01(gesture.startVol + delta, 0, 1)
-    v.volume = next
-    v.muted = next === 0
-    updatePcMute()
-    const vol = $('pcVol'); if (vol) vol.value = String(next)
-    showIndicator(next === 0 ? '🔇' : '🔊', next, Math.round(next * 100) + '%')
+    if (volumeWritable) {
+      v.volume = next
+      v.muted = next === 0
+      updatePcMute()
+      const vol = $('pcVol'); if (vol) vol.value = String(next)
+      showIndicator(next === 0 ? '🔇' : '🔊', next, Math.round(next * 100) + '%')
+    } else {
+      showIndicator('🔊', 1, 'Use volume buttons')
+    }
   }
 })
 
 function endGesture(e) {
   if (!gesture) return
   if (e.pointerId !== undefined && e.pointerId !== gesture.pointerId) return
-  const moved = gesture.moved
+  const g = gesture
   gesture = null
-  if (moved) hideIndicatorSoon()
+  if (!g.moved) return
+
+  if (g.kind === 'seek' && Math.abs(g.seekDelta) >= 1) {
+    const maxT = v.duration || 0
+    v.currentTime = Math.max(0, Math.min(maxT, g.startTime + g.seekDelta))
+    if (connected && hostId === myId()) sendSeek(v.currentTime - offset)
+    sys(`Jumped ${g.seekDelta >= 0 ? 'forward' : 'back'} ${Math.round(Math.abs(g.seekDelta))}s`)
+  }
+  hideIndicatorSoon()
 }
 dropzone.addEventListener('pointerup', endGesture)
 dropzone.addEventListener('pointercancel', endGesture)
 
-// Stop the browser from turning a vertical swipe into a page scroll / pull-to-refresh.
+// Stop the browser from turning a gesture into a page scroll / pull-to-refresh.
 dropzone.addEventListener('touchmove', e => {
   if (gesture && gesture.moved) e.preventDefault()
 }, { passive: false })
@@ -1726,7 +1980,7 @@ $('sync').onclick = () => {
   const h = hashFrame(v)
   if (!h) return say('Load a video first')
   sendSyncReq(h, v.currentTime - offset)
-  say('Sync request sent')
+  say('Sync request sent — searching ±45s around your position')
 }
 $('restart').onclick = () => {
   if (hostId && hostId !== myId()) return say('Only the host can restart')

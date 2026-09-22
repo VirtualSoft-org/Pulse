@@ -246,21 +246,38 @@ async function open() {
   }).then(() => {
     live = true
     retries = 0
+    reconnectInFlight = false
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
     handlers.onStatus?.('connected')
     startPoll()
+    startHealthCheck()
   })
 }
 
+let reconnectTimer = null
+let reconnectInFlight = false
+
 function scheduleReconnect() {
-  if (!live) return
+  if (reconnectTimer || reconnectInFlight) return
   live = false
   retries++
   handlers.onStatus?.(retries >= 5 ? 'lost' : 'reconnecting')
-  const wait = Math.min(10000, 500 * 2 ** retries)
-  setTimeout(async () => {
+  // Cap at 30s — still feels instant to a returning user, and drops
+  // sustained-outage churn to 2 messages per client per minute.
+  const wait = Math.min(30000, 500 * 2 ** retries)
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null
     if (!topic) return
-    await removeStale()
-    try { await open() } catch { scheduleReconnect() }
+    reconnectInFlight = true
+    try {
+      await removeStale()
+      await open()
+    } catch (e) {
+      console.warn('[pulse] reconnect attempt failed:', e && e.message)
+      reconnectInFlight = false
+      live = false
+      scheduleReconnect()
+    }
   }, wait)
 }
 
@@ -268,6 +285,41 @@ async function removeStale() {
   if (ch) { try { await sb.removeChannel(ch) } catch {} }
   ch = null
 }
+
+// Health check: some socket drops don't fire a status callback, so we poll
+// the channel state on a timer. Covers backgrounded tabs, WiFi switches,
+// and OS suspend/resume.
+let healthTimer = null
+function startHealthCheck() {
+  stopHealthCheck()
+  healthTimer = setInterval(() => {
+    if (!topic) return
+    const unhealthy = !ch || ch.state !== 'joined'
+    if (!unhealthy) return
+    if (!live && (reconnectTimer || reconnectInFlight)) return   // already retrying
+    live = false
+    scheduleReconnect()
+  }, 15000)
+}
+function stopHealthCheck() {
+  if (healthTimer) clearInterval(healthTimer)
+  healthTimer = null
+}
+
+window.addEventListener('online', () => {
+  if (!topic) return
+  if (live && ch && ch.state === 'joined') return
+  live = false
+  scheduleReconnect()
+})
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  if (!topic) return
+  if (live && ch && ch.state === 'joined') return
+  live = false
+  scheduleReconnect()
+})
 
 function send(e) {
   if (!ch || !live) return Promise.resolve()
@@ -283,6 +335,7 @@ export const sendSyncRes  = (to, ok, off) => send({ t: 'sync_res', to, ok, offse
 export const sendReaction = emoji         => send({ t: 'reaction', emoji })
 export const sendPosReq   = ()            => send({ t: 'pos_req' })
 export const sendPosRes   = (to, at, playing) => send({ t: 'pos_res', to, at, playing, sentAt: Date.now() })
+export const sendReset    = ()            => send({ t: 'reset' })
 
 export async function setReady(ready) {
   myReady = ready
@@ -304,6 +357,9 @@ export function transferHost(toTabId) {
 
 export async function disconnect() {
   stopPoll()
+  stopHealthCheck()
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  reconnectInFlight = false
   if (ch) { try { await ch.untrack() } catch {} }
   await removeStale()
   memberMap.clear()
