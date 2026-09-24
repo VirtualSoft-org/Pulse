@@ -11,6 +11,8 @@ const SHELL = [
   './pulse.js',
   './manifest.webmanifest',
   './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
   './favicon-32.png',
   './apple-touch-icon.png',
 ]
